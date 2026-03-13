@@ -687,8 +687,19 @@ def admin_sessions(admin: dict = Depends(require_admin)):
 
 # ── SSE: broadcast progress stream ───────────────────────────────────────────
 @app.get("/api/broadcast/stream")
-async def broadcast_stream(token: str = Depends(get_tg_session_token),
-                            _: dict = Depends(get_current_app_user)):
+async def broadcast_stream(request: Request,
+                            token: str = Depends(get_tg_session_token),
+                            jwt: Optional[str] = None):
+    # EventSource can't send headers — accept JWT as query param for SSE only
+    if jwt:
+        decode_jwt(jwt)  # validates, raises 401 if invalid
+    else:
+        # fall back to Authorization header
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            decode_jwt(auth[7:])
+        else:
+            raise HTTPException(status_code=401, detail="Not authenticated")
     async def event_generator():
         last_sent = 0
         last_log_len = 0
