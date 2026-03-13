@@ -15,6 +15,7 @@ import bcrypt
 import jwt as pyjwt
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Depends, Header
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -133,6 +134,9 @@ def init_db():
         c.execute("ALTER TABLE broadcast_history ADD COLUMN app_user_id INTEGER")
     if "app_username" not in cols:
         c.execute("ALTER TABLE broadcast_history ADD COLUMN app_username TEXT")
+    if "log" not in cols:
+        c.execute("ALTER TABLE broadcast_history ADD COLUMN log TEXT")
+        logger.info("Migrated broadcast_history: added log")
     conn.commit()
     conn.close()
 
@@ -551,12 +555,13 @@ async def _run_broadcast(req: BroadcastRequest, token: str, app_user: dict):
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
         """INSERT INTO broadcast_history
-           (message, total, sent, failed, started_at, finished_at, tg_session_token, app_user_id, app_username)
-           VALUES (?,?,?,?,?,?,?,?,?)""",
+           (message, total, sent, failed, started_at, finished_at, tg_session_token, app_user_id, app_username, log)
+           VALUES (?,?,?,?,?,?,?,?,?,?)""",
         (
             (req.message or "")[:200], status["total"], status["sent"], status["failed"],
             started_at, datetime.utcnow().isoformat(),
-            token, int(app_user["sub"]), app_user["username"]
+            token, int(app_user["sub"]), app_user["username"],
+            json.dumps(status["log"])
         )
     )
     conn.commit()
@@ -644,28 +649,28 @@ def delete_template(tid: int, _: dict = Depends(get_current_app_user)):
 def get_history(app_user: dict = Depends(get_current_app_user)):
     conn = sqlite3.connect(DB_PATH)
     if app_user["role"] == "admin":
-        # Admin sees all history with username
         rows = conn.execute(
-            """SELECT id, message, total, sent, failed, started_at, finished_at, app_username
+            """SELECT id, message, total, sent, failed, started_at, finished_at, app_username, log
                FROM broadcast_history ORDER BY id DESC LIMIT 100"""
         ).fetchall()
         result = [
             {"id": r[0], "message": r[1], "total": r[2], "sent": r[3],
              "failed": r[4], "started_at": r[5], "finished_at": r[6],
-             "started_by": r[7] or "unknown"}
+             "started_by": r[7] or "unknown",
+             "log": json.loads(r[8]) if r[8] else []}
             for r in rows
         ]
     else:
-        # User sees only their own history
         rows = conn.execute(
-            """SELECT id, message, total, sent, failed, started_at, finished_at
+            """SELECT id, message, total, sent, failed, started_at, finished_at, log
                FROM broadcast_history WHERE app_user_id=? ORDER BY id DESC LIMIT 50""",
             (int(app_user["sub"]),)
         ).fetchall()
         result = [
             {"id": r[0], "message": r[1], "total": r[2], "sent": r[3],
              "failed": r[4], "started_at": r[5], "finished_at": r[6],
-             "started_by": app_user["username"]}
+             "started_by": app_user["username"],
+             "log": json.loads(r[7]) if r[7] else []}
             for r in rows
         ]
     conn.close()
@@ -679,6 +684,45 @@ def admin_sessions(admin: dict = Depends(require_admin)):
         label = saved_phones.get(token, token[:8] + "...")
         result.append({"token": token, "label": label})
     return {"sessions": result}
+
+# ── SSE: broadcast progress stream ───────────────────────────────────────────
+@app.get("/api/broadcast/stream")
+async def broadcast_stream(token: str = Depends(get_tg_session_token),
+                            _: dict = Depends(get_current_app_user)):
+    async def event_generator():
+        last_sent = 0
+        last_log_len = 0
+        while True:
+            status = get_broadcast_status(token)
+            log_len = len(status.get("log", []))
+            # Send update if something changed
+            if log_len != last_log_len or status.get("sent", 0) != last_sent:
+                last_sent = status.get("sent", 0)
+                last_log_len = log_len
+                data = json.dumps({
+                    "running": status["running"],
+                    "finished": status["finished"],
+                    "total": status["total"],
+                    "sent": status["sent"],
+                    "failed": status["failed"],
+                    "current_chat": status["current_chat"],
+                    "log": status["log"][-20:],  # last 20 lines only
+                })
+                yield f"data: {data}\n\n"
+            if not status["running"] and status["finished"]:
+                # Send final state then close
+                yield f"data: {json.dumps({**status, 'log': status['log'][-20:]})}\n\n"
+                break
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        }
+    )
 
 # ── Health ────────────────────────────────────────────────────────────────────
 @app.get("/health")
