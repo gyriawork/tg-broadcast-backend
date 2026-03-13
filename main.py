@@ -259,6 +259,22 @@ def delete_user(user_id: int, admin: dict = Depends(require_admin)):
     conn.close()
     return {"deleted": True}
 
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+@app.put("/api/auth/me/password")
+def change_my_password(req: ChangePasswordRequest, current: dict = Depends(require_app_user)):
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute("SELECT password_hash FROM app_users WHERE id=?", (int(current["sub"]),)).fetchone()
+    if not row or not verify_password(req.old_password, row[0]):
+        conn.close()
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    conn.execute("UPDATE app_users SET password_hash=? WHERE id=?", (hash_password(req.new_password), int(current["sub"])))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
 @app.put("/api/auth/users/{user_id}/password")
 def reset_password(user_id: int, admin: dict = Depends(require_admin)):
     new_pw = secrets.token_urlsafe(12)
@@ -606,7 +622,11 @@ def get_history(app_user: dict = Depends(get_current_app_user)):
 # ── Admin: list active TG sessions ───────────────────────────────────────────
 @app.get("/api/admin/sessions")
 def admin_sessions(admin: dict = Depends(require_admin)):
-    return {"sessions": list(tg_clients.keys())}
+    result = []
+    for token, client in tg_clients.items():
+        label = saved_phones.get(token, token[:8] + "...")
+        result.append({"token": token, "label": label})
+    return {"sessions": result}
 
 # ── Health ────────────────────────────────────────────────────────────────────
 @app.get("/health")
