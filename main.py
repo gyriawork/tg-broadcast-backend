@@ -372,16 +372,24 @@ async def get_chats(token: str = Depends(get_tg_session_token),
                     _: dict = Depends(get_current_app_user)):
     c = get_tg_client(token)
     chats = []
-    async for dialog in c.iter_dialogs():
-        entity = dialog.entity
-        if isinstance(entity, (Channel, Chat)):
-            chats.append({
-                "id": dialog.id,
-                "name": dialog.name,
-                "type": "channel" if isinstance(entity, Channel) and entity.broadcast else "group",
-                "members": getattr(entity, "participants_count", None),
-                "username": getattr(entity, "username", None),
-            })
+    try:
+        async for dialog in c.iter_dialogs():
+            entity = dialog.entity
+            if isinstance(entity, (Channel, Chat)):
+                chats.append({
+                    "id": dialog.id,
+                    "name": dialog.name,
+                    "type": "channel" if isinstance(entity, Channel) and entity.broadcast else "group",
+                    "members": getattr(entity, "participants_count", None),
+                    "username": getattr(entity, "username", None),
+                })
+    except errors.AuthKeyUnregisteredError:
+        # Session file is invalid — clean up and tell client to re-auth
+        tg_clients.pop(token, None)
+        session_path = os.path.join(DATA_DIR, "sessions", f"{token}.session")
+        if os.path.exists(session_path):
+            os.remove(session_path)
+        raise HTTPException(status_code=401, detail="Session expired — please reconnect your Telegram account")
     return {"chats": chats}
 
 # ── File upload ───────────────────────────────────────────────────────────────
