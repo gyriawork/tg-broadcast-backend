@@ -4,6 +4,7 @@ import logging
 import os
 import random
 import secrets
+import shutil
 import sqlite3
 import time
 from contextlib import asynccontextmanager
@@ -13,7 +14,7 @@ from typing import Optional
 import bcrypt
 import jwt as pyjwt
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, Header
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -33,6 +34,15 @@ JWT_SECRET    = os.environ.get("JWT_SECRET", "change-me-in-production-please")
 JWT_ALGORITHM = "HS256"
 JWT_EXP_HOURS = 72
 bearer_scheme = HTTPBearer(auto_error=False)
+
+# ── Upload config ─────────────────────────────────────────────────────────────
+MAX_UPLOAD_BYTES  = 50 * 1024 * 1024   # 50 MB hard limit
+UPLOAD_TTL_HOURS  = 24                  # auto-delete files older than 24h
+
+# ── Login rate limiting ───────────────────────────────────────────────────────
+_login_attempts: dict[str, list[float]] = {}   # ip -> [timestamps]
+LOGIN_WINDOW_SEC  = 60
+LOGIN_MAX_ATTEMPTS = 10
 
 def hash_password(pw: str) -> str:
     return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
@@ -127,9 +137,28 @@ def init_db():
     conn.close()
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
+async def _cleanup_old_uploads():
+    """Delete upload folders older than UPLOAD_TTL_HOURS. Runs every hour."""
+    while True:
+        await asyncio.sleep(3600)
+        cutoff = time.time() - UPLOAD_TTL_HOURS * 3600
+        uploads_root = os.path.join(DATA_DIR, "uploads")
+        if not os.path.isdir(uploads_root):
+            continue
+        for folder in os.listdir(uploads_root):
+            folder_path = os.path.join(uploads_root, folder)
+            try:
+                if os.path.isdir(folder_path) and os.path.getmtime(folder_path) < cutoff:
+                    shutil.rmtree(folder_path, ignore_errors=True)
+                    uploaded_files.pop(folder, None)
+                    logger.info(f"Cleaned up old upload folder: {folder}")
+            except Exception as e:
+                logger.warning(f"Cleanup error for {folder}: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    asyncio.create_task(_cleanup_old_uploads())
     yield
     for c in tg_clients.values():
         if c.is_connected():
@@ -204,7 +233,17 @@ class CreateUserRequest(BaseModel):
     password: Optional[str] = None  # if None — auto-generate
 
 @app.post("/api/auth/login")
-def app_login(req: AppLoginRequest):
+def app_login(req: AppLoginRequest, request: Request):
+    # Rate limit by IP
+    ip = request.client.host if request.client else "unknown"
+    now = time.time()
+    attempts = _login_attempts.get(ip, [])
+    attempts = [t for t in attempts if now - t < LOGIN_WINDOW_SEC]
+    if len(attempts) >= LOGIN_MAX_ATTEMPTS:
+        raise HTTPException(status_code=429, detail="Too many login attempts — wait a minute")
+    attempts.append(now)
+    _login_attempts[ip] = attempts
+
     conn = sqlite3.connect(DB_PATH)
     row = conn.execute(
         "SELECT id, username, password_hash, role FROM app_users WHERE username=?",
@@ -401,6 +440,11 @@ async def upload_file(file: UploadFile = File(...),
     os.makedirs(upload_dir, exist_ok=True)
     file_path = os.path.join(upload_dir, file.filename)
     content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large — max {MAX_UPLOAD_BYTES // (1024*1024)} MB allowed"
+        )
     with open(file_path, "wb") as f:
         f.write(content)
     uploaded_files[token] = {
