@@ -10,11 +10,12 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Optional
 
+import bcrypt
+import jwt as pyjwt
+
 from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import JWTError, jwt
-from passlib.context import CryptContext
 from pydantic import BaseModel
 from telethon import TelegramClient, errors
 from telethon.tl.types import Channel, Chat
@@ -31,8 +32,16 @@ SESSIONS_DIR = os.path.join(DATA_DIR, "sessions")
 JWT_SECRET    = os.environ.get("JWT_SECRET", "change-me-in-production-please")
 JWT_ALGORITHM = "HS256"
 JWT_EXP_HOURS = 72
-pwd_ctx       = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer(auto_error=False)
+
+def hash_password(pw: str) -> str:
+    return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
+
+def verify_password(pw: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(pw.encode(), hashed.encode())
+    except Exception:
+        return False
 
 # ── Global per-session state ──────────────────────────────────────────────────
 tg_clients:       dict[str, TelegramClient] = {}
@@ -60,7 +69,7 @@ def init_db():
     row = c.execute("SELECT COUNT(*) FROM app_users").fetchone()
     if row[0] == 0:
         default_pw = os.environ.get("ADMIN_PASSWORD", "admin123")
-        hashed = pwd_ctx.hash(default_pw)
+        hashed = hash_password(default_pw)
         c.execute(
             "INSERT INTO app_users (username, password_hash, role, created_at) VALUES (?,?,?,?)",
             ("admin", hashed, "admin", datetime.utcnow().isoformat())
@@ -127,13 +136,15 @@ def create_jwt(user_id: int, username: str, role: str) -> str:
         "role": role,
         "exp": datetime.utcnow() + timedelta(hours=JWT_EXP_HOURS),
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return pyjwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 def decode_jwt(token: str) -> dict:
     try:
-        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+        return pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except pyjwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except pyjwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 def get_current_app_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
@@ -188,7 +199,7 @@ def app_login(req: AppLoginRequest):
         (req.username,)
     ).fetchone()
     conn.close()
-    if not row or not pwd_ctx.verify(req.password, row[2]):
+    if not row or not verify_password(req.password, row[2]):
         raise HTTPException(status_code=401, detail="Wrong username or password")
     token = create_jwt(row[0], row[1], row[3])
     return {"token": token, "username": row[1], "role": row[3], "id": row[0]}
@@ -212,7 +223,7 @@ def list_users(admin: dict = Depends(require_admin)):
 @app.post("/api/auth/users")
 def create_user(req: CreateUserRequest, admin: dict = Depends(require_admin)):
     password = req.password or secrets.token_urlsafe(12)
-    hashed = pwd_ctx.hash(password)
+    hashed = hash_password(password)
     conn = sqlite3.connect(DB_PATH)
     try:
         conn.execute(
@@ -239,7 +250,7 @@ def delete_user(user_id: int, admin: dict = Depends(require_admin)):
 @app.put("/api/auth/users/{user_id}/password")
 def reset_password(user_id: int, admin: dict = Depends(require_admin)):
     new_pw = secrets.token_urlsafe(12)
-    hashed = pwd_ctx.hash(new_pw)
+    hashed = hash_password(new_pw)
     conn = sqlite3.connect(DB_PATH)
     conn.execute("UPDATE app_users SET password_hash=? WHERE id=?", (hashed, user_id))
     conn.commit()
