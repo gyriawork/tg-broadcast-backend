@@ -83,6 +83,18 @@ def init_db():
         created_at TEXT NOT NULL,
         owner_app_user_id INTEGER
     )""")
+    # ── migrations: add columns if missing ──
+    existing_cols = {row[1] for row in c.execute("PRAGMA table_info(chat_lists)")}
+    if "owner_app_user_id" not in existing_cols:
+        c.execute("ALTER TABLE chat_lists ADD COLUMN owner_app_user_id INTEGER")
+        logger.info("Migrated chat_lists: added owner_app_user_id")
+    hist_cols = {row[1] for row in c.execute("PRAGMA table_info(broadcast_history)")}
+    if "app_user_id" not in hist_cols:
+        c.execute("ALTER TABLE broadcast_history ADD COLUMN app_user_id INTEGER")
+        logger.info("Migrated broadcast_history: added app_user_id")
+    if "app_username" not in hist_cols:
+        c.execute("ALTER TABLE broadcast_history ADD COLUMN app_username TEXT")
+        logger.info("Migrated broadcast_history: added app_username")
     # ── templates ──
     c.execute("""CREATE TABLE IF NOT EXISTS templates (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
