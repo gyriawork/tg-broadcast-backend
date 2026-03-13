@@ -263,7 +263,7 @@ async def _run_broadcast(req: BroadcastRequest):
             await asyncio.sleep(wait)
 
         try:
-            entity = await c.get_entity(chat_id)
+            entity = await asyncio.wait_for(c.get_entity(chat_id), timeout=15)
             name = getattr(entity, "title", str(chat_id))
             broadcast_status["current_chat"] = name
             if uploaded_file and os.path.exists(uploaded_file["path"]):
