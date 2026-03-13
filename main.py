@@ -264,7 +264,7 @@ class ChangePasswordRequest(BaseModel):
     new_password: str
 
 @app.put("/api/auth/me/password")
-def change_my_password(req: ChangePasswordRequest, current: dict = Depends(require_app_user)):
+def change_my_password(req: ChangePasswordRequest, current: dict = Depends(get_current_app_user)):
     conn = sqlite3.connect(DB_PATH)
     row = conn.execute("SELECT password_hash FROM app_users WHERE id=?", (int(current["sub"]),)).fetchone()
     if not row or not verify_password(req.old_password, row[0]):
