@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TG Broadcast</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #080c10;
+    --surface: #0e1520;
+    --surface2: #152030;
+    --border: #1e3040;
+    --accent: #00d4ff;
+    --accent2: #0090cc;
+    --green: #00ff88;
+    --red: #ff4466;
+    --yellow: #ffcc00;
+    --text: #c8dde8;
+    --muted: #4a6070;
+    --radius: 6px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+  #root { min-height: 100vh; display: flex; flex-direction: column; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* Header */
+  .header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 28px; border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .header-logo { display: flex; align-items: center; gap: 10px; }
+  .logo-icon { width: 32px; height: 32px; background: var(--accent); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+  .logo-text { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 18px; color: var(--accent); letter-spacing: -0.5px; }
+  .logo-sub { font-size: 10px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; }
+  .header-user { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+  /* Nav */
+  .nav { display: flex; gap: 2px; padding: 12px 28px; border-bottom: 1px solid var(--border); background: var(--bg); }
+  .nav-btn {
+    padding: 6px 16px; border-radius: var(--radius); cursor: pointer; border: none;
+    background: transparent; color: var(--muted); font-family: inherit; font-size: 12px;
+    letter-spacing: 1px; text-transform: uppercase; transition: all .2s;
+  }
+  .nav-btn:hover { color: var(--text); background: var(--surface); }
+  .nav-btn.active { color: var(--accent); background: var(--surface); border-bottom: 2px solid var(--accent); }
+
+  /* Main layout */
+  .main { flex: 1; display: flex; gap: 0; overflow: hidden; }
+  .page { flex: 1; padding: 28px; overflow-y: auto; }
+
+  /* Cards */
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 20px; margin-bottom: 16px;
+  }
+  .card-title { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 14px; color: var(--accent); margin-bottom: 16px; letter-spacing: 0.5px; text-transform: uppercase; }
+
+  /* Form */
+  label { display: block; font-size: 11px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; margin-top: 14px; }
+  label:first-of-type { margin-top: 0; }
+  input[type="text"], input[type="tel"], input[type="number"], input[type="password"], textarea {
+    width: 100%; padding: 10px 12px; border-radius: var(--radius);
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    font-family: inherit; font-size: 13px; outline: none; transition: border-color .2s;
+  }
+  input:focus, textarea:focus { border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 100px; }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px;
+    border-radius: var(--radius); border: none; cursor: pointer; font-family: inherit;
+    font-size: 12px; font-weight: 500; letter-spacing: 0.5px; transition: all .2s;
+  }
+  .btn-primary { background: var(--accent); color: var(--bg); }
+  .btn-primary:hover { background: #00b8e0; transform: translateY(-1px); }
+  .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-danger { background: var(--red); color: #fff; }
+  .btn-danger:hover { background: #e0003a; }
+  .btn-success { background: var(--green); color: var(--bg); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  .btn-sm { padding: 6px 12px; font-size: 11px; }
+
+  /* Toggle */
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; }
+  .toggle-label { font-size: 12px; color: var(--text); }
+  .toggle { position: relative; width: 40px; height: 22px; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    background: var(--border); border-radius: 11px; cursor: pointer; transition: .3s;
+  }
+  .toggle-slider:before {
+    position: absolute; content: ''; height: 16px; width: 16px; left: 3px; bottom: 3px;
+    background: var(--muted); border-radius: 50%; transition: .3s;
+  }
+  input:checked + .toggle-slider { background: var(--accent2); }
+  input:checked + .toggle-slider:before { transform: translateX(18px); background: var(--accent); }
+
+  /* Chat list */
+  .chat-list { max-height: 420px; overflow-y: auto; }
+  .chat-item {
+    display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+    border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 6px;
+    cursor: pointer; transition: all .15s;
+  }
+  .chat-item:hover { border-color: var(--accent2); background: var(--surface2); }
+  .chat-item.selected { border-color: var(--accent); background: rgba(0,212,255,0.06); }
+  .chat-avatar {
+    width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: bold; flex-shrink: 0;
+  }
+  .chat-avatar.group { background: rgba(0,212,255,0.15); color: var(--accent); }
+  .chat-avatar.channel { background: rgba(0,144,204,0.15); color: var(--accent2); }
+  .chat-info { flex: 1; min-width: 0; }
+  .chat-name { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chat-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .chat-check { width: 18px; height: 18px; border: 2px solid var(--border); border-radius: 4px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .chat-item.selected .chat-check { background: var(--accent); border-color: var(--accent); }
+
+  /* Progress */
+  .progress-bar { width: 100%; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin: 12px 0; }
+  .progress-fill { height: 100%; background: var(--accent); transition: width .3s; }
+  .stats-row { display: flex; gap: 16px; margin: 12px 0; }
+  .stat { flex: 1; text-align: center; padding: 10px; background: var(--bg); border-radius: var(--radius); border: 1px solid var(--border); }
+  .stat-val { font-size: 24px; font-family: 'Syne', sans-serif; font-weight: 800; }
+  .stat-key { font-size: 10px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-top: 2px; }
+  .val-green { color: var(--green); }
+  .val-red { color: var(--red); }
+  .val-blue { color: var(--accent); }
+
+  /* Log */
+  .log-box {
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px; font-size: 12px; line-height: 1.7; max-height: 260px; overflow-y: auto;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .log-line { padding: 1px 0; }
+
+  /* Login page */
+  .login-wrap { max-width: 440px; margin: 60px auto; }
+  .login-hero { text-align: center; margin-bottom: 32px; }
+  .login-hero h1 { font-family: 'Syne', sans-serif; font-size: 36px; font-weight: 800; color: var(--accent); }
+  .login-hero p { color: var(--muted); margin-top: 8px; font-size: 12px; }
+
+  /* Alert */
+  .alert { padding: 10px 14px; border-radius: var(--radius); font-size: 12px; margin-top: 12px; }
+  .alert-err { background: rgba(255,68,102,0.1); border: 1px solid rgba(255,68,102,0.3); color: var(--red); }
+  .alert-ok { background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.25); color: var(--green); }
+  .alert-info { background: rgba(0,212,255,0.08); border: 1px solid rgba(0,212,255,0.2); color: var(--accent); }
+
+  /* Sidebar */
+  .sidebar { width: 280px; background: var(--surface); border-left: 1px solid var(--border); padding: 20px; overflow-y: auto; }
+  .sidebar-title { font-size: 11px; color: var(--muted); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 12px; }
+
+  /* Chips */
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 11px; background: var(--surface2); border: 1px solid var(--border); color: var(--muted); cursor: pointer; }
+  .chip:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Badge */
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; letter-spacing: 0.5px; }
+  .badge-blue { background: rgba(0,212,255,0.15); color: var(--accent); }
+  .badge-green { background: rgba(0,255,136,0.12); color: var(--green); }
+  .badge-red { background: rgba(255,68,102,0.12); color: var(--red); }
+
+  /* History table */
+  table { width: 100%; border-collapse: collapse; }
+  th { font-size: 10px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text); }
+  tr:hover td { background: var(--surface2); }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .row-gap { display: flex; gap: 10px; align-items: flex-end; margin-top: 14px; }
+  .flex-end { display: flex; justify-content: flex-end; }
+  .mt { margin-top: 12px; }
+  .sep { height: 1px; background: var(--border); margin: 16px 0; }
+
+  /* Spinner */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; }
+
+  /* Scan line effect */
+  body::before {
+    content: ''; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,212,255,0.01) 2px, rgba(0,212,255,0.01) 4px);
+    pointer-events: none; z-index: 9999;
+  }
+
+  .selected-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .search-row { margin-bottom: 10px; }
+  .current-tag { font-size: 11px; color: var(--accent); padding: 3px 8px; border: 1px solid var(--accent2); border-radius: 4px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script>
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ── API URL — берём из sessionStorage или prompt при первом запуске ───────────
+function getApiBase() {
+  // Сначала смотрим sessionStorage (не localStorage — намеренно, для безопасности)
+  let base = sessionStorage.getItem('api_base');
+  if (base) return base;
+  // Иначе — дефолт для локального запуска
+  return 'http://localhost:8000';
+}
+let API_BASE = getApiBase();
+
+const api = {
+  get: (path) => fetch(API_BASE + path).then(r => { if(!r.ok) throw new Error(r.status); return r.json(); }),
+  post: (path, body) => fetch(API_BASE + path, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }).then(r => { if(!r.ok) return r.json().then(e => { throw new Error(e.detail || r.status); }); return r.json(); }),
+  del: (path) => fetch(API_BASE + path, { method:'DELETE' }).then(r => r.json()),
+};
+
+// ── Settings Screen — ввод URL бэкенда ──────────────────────────────────────
+function SettingsScreen({ onSave }) {
+  const [url, setUrl] = useState(API_BASE);
+  const [testing, setTesting] = useState(false);
+  const [err, setErr] = useState('');
+  const [ok, setOk] = useState(false);
+
+  const test = async () => {
+    setTesting(true); setErr(''); setOk(false);
+    try {
+      const r = await fetch(url.replace(/\/$/, '') + '/health');
+      if (r.ok) { setOk(true); }
+      else setErr('Сервер ответил с ошибкой: ' + r.status);
+    } catch(e) { setErr('Не удалось подключиться. Проверь URL.'); }
+    setTesting(false);
+  };
+
+  const save = () => {
+    const clean = url.replace(/\/$/, '');
+    sessionStorage.setItem('api_base', clean);
+    API_BASE = clean;
+    onSave();
+  };
+
+  return (
+    <div className="login-wrap">
+      <div className="login-hero">
+        <h1>📡 TG Broadcast</h1>
+        <p>Укажи адрес твоего бэкенда на Railway</p>
+      </div>
+      <div className="card">
+        <div className="card-title">🌐 Адрес бэкенда</div>
+        <p style={{fontSize:'12px',color:'var(--muted)',marginBottom:12}}>
+          Скопируй URL из Railway (вкладка Settings → Domains) и вставь сюда.
+          Выглядит примерно так: <span style={{color:'var(--accent)'}}>https://xxx.railway.app</span>
+        </p>
+        <label>Backend URL</label>
+        <input type="text" placeholder="https://your-app.railway.app" value={url} onChange={e=>setUrl(e.target.value)} />
+        {err && <div className="alert alert-err" style={{marginTop:8}}>{err}</div>}
+        {ok && <div className="alert alert-ok" style={{marginTop:8}}>✅ Сервер доступен!</div>}
+        <div className="row-gap" style={{marginTop:14}}>
+          <button className="btn btn-secondary" onClick={test} disabled={testing || !url}>
+            {testing ? <><span className="spinner"/> Проверка…</> : '🔍 Проверить'}
+          </button>
+          <button className="btn btn-primary" onClick={save} disabled={!url}>
+            Сохранить →
+          </button>
+        </div>
+      </div>
+      <div style={{textAlign:'center',marginTop:12}}>
+        <span style={{fontSize:11,color:'var(--muted)'}}>Для локального запуска оставь </span>
+        <span style={{fontSize:11,color:'var(--accent)'}}>http://localhost:8000</span>
+        <span style={{fontSize:11,color:'var(--muted)'}}> и нажми Сохранить</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Login Page ───────────────────────────────────────────────────────────────
+function LoginPage({ onAuth }) {
+  const [step, setStep] = useState('config'); // config | phone | code | 2fa
+  const [apiId, setApiId] = useState('');
+  const [apiHash, setApiHash] = useState('');
+  const [phone, setPhone] = useState('');
+  const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const [msg, setMsg] = useState('');
+
+  const doConnect = async () => {
+    setLoading(true); setErr('');
+    try {
+      const r = await api.post('/api/connect', { api_id: parseInt(apiId), api_hash: apiHash });
+      if (r.authorized) { const me = await api.get('/api/me'); onAuth(me); }
+      else setStep('phone');
+    } catch(e) { setErr('Connection failed: ' + e.message); }
+    setLoading(false);
+  };
+
+  const doPhone = async () => {
+    setLoading(true); setErr('');
+    try {
+      await api.post('/api/send_code', { phone });
+      setStep('code'); setMsg('Code sent to your Telegram!');
+    } catch(e) { setErr('Failed to send code'); }
+    setLoading(false);
+  };
+
+  const doCode = async () => {
+    setLoading(true); setErr('');
+    try {
+      const r = await api.post('/api/verify_code', { code, password: password || null });
+      if (r.authorized) onAuth(r);
+    } catch(e) {
+      if (e.message && e.message.includes('2FA')) setStep('2fa');
+      else setErr('Invalid code');
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="login-wrap">
+      <div className="login-hero">
+        <h1>📡 TG Broadcast</h1>
+        <p>Telegram user-account broadcast tool via Telethon</p>
+      </div>
+
+      {step === 'config' && (
+        <div className="card">
+          <div className="card-title">🔑 API Credentials</div>
+          <p style={{fontSize:'12px',color:'var(--muted)',marginBottom:12}}>
+            Get your credentials from <a href="https://my.telegram.org" target="_blank" style={{color:'var(--accent)'}}>my.telegram.org</a> → API development tools
+          </p>
+          <label>API ID</label>
+          <input type="text" placeholder="12345678" value={apiId} onChange={e=>setApiId(e.target.value)} />
+          <label>API Hash</label>
+          <input type="text" placeholder="abc123..." value={apiHash} onChange={e=>setApiHash(e.target.value)} />
+          {err && <div className="alert alert-err">{err}</div>}
+          <div style={{marginTop:16}}>
+            <button className="btn btn-primary" onClick={doConnect} disabled={loading || !apiId || !apiHash}>
+              {loading ? <><span className="spinner"/> Connecting…</> : '→ Connect'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === 'phone' && (
+        <div className="card">
+          <div className="card-title">📱 Phone Number</div>
+          <label>Phone (international format)</label>
+          <input type="tel" placeholder="+79001234567" value={phone} onChange={e=>setPhone(e.target.value)} />
+          {err && <div className="alert alert-err">{err}</div>}
+          <div className="row-gap">
+            <button className="btn btn-secondary btn-sm" onClick={()=>setStep('config')}>← Back</button>
+            <button className="btn btn-primary" onClick={doPhone} disabled={loading || !phone}>
+              {loading ? <><span className="spinner"/> Sending…</> : 'Send Code →'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {(step === 'code' || step === '2fa') && (
+        <div className="card">
+          <div className="card-title">{step === '2fa' ? '🔐 2FA Password' : '📨 Verification Code'}</div>
+          {msg && <div className="alert alert-info" style={{marginBottom:12}}>{msg}</div>}
+          {step === 'code' && (
+            <>
+              <label>Code from Telegram</label>
+              <input type="text" placeholder="12345" value={code} onChange={e=>setCode(e.target.value)} />
+            </>
+          )}
+          <label>2FA Password {step === 'code' ? '(if enabled)' : '(required)'}</label>
+          <input type="password" placeholder="••••••••" value={password} onChange={e=>setPassword(e.target.value)} />
+          {err && <div className="alert alert-err">{err}</div>}
+          <div className="row-gap">
+            <button className="btn btn-secondary btn-sm" onClick={()=>setStep('phone')}>← Back</button>
+            <button className="btn btn-primary" onClick={doCode} disabled={loading || !code}>
+              {loading ? <><span className="spinner"/> Verifying…</> : 'Verify →'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Chat Loader Page ─────────────────────────────────────────────────────────
+function ChatsPage({ selected, setSelected }) {
+  const [chats, setChats] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState('');
+  const [lists, setLists] = useState([]);
+  const [saveListName, setSaveListName] = useState('');
+  const [err, setErr] = useState('');
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => { loadLists(); }, []);
+
+  const loadChats = async () => {
+    setLoading(true); setErr('');
+    try { const r = await api.get('/api/chats'); setChats(r.chats); }
+    catch(e) { setErr('Failed to load chats'); }
+    setLoading(false);
+  };
+
+  const loadLists = async () => {
+    const r = await api.get('/api/lists');
+    setLists(r.lists || []);
+  };
+
+  const toggle = (id) => {
+    setSelected(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]);
+  };
+
+  const filtered = chats.filter(c => c.name.toLowerCase().includes(search.toLowerCase()));
+  const selectAll = () => setSelected(filtered.map(c=>c.id));
+  const clearAll = () => setSelected([]);
+
+  const doSaveList = async () => {
+    if (!saveListName || !selected.length) return;
+    await api.post('/api/lists', { name: saveListName, chat_ids: selected });
+    setSaveListName(''); setMsg('List saved!'); loadLists();
+    setTimeout(() => setMsg(''), 2500);
+  };
+
+  const loadSavedList = (lst) => {
+    setSelected(lst.chats);
+  };
+
+  const deleteList = async (id) => {
+    await api.del('/api/lists/' + id); loadLists();
+  };
+
+  return (
+    <div className="main">
+      <div className="page">
+        <div className="card">
+          <div className="card-title">📂 Load Chats</div>
+          <div style={{display:'flex',gap:10}}>
+            <button className="btn btn-primary" onClick={loadChats} disabled={loading}>
+              {loading ? <><span className="spinner"/> Loading…</> : '⟳ Load My Chats'}
+            </button>
+            {chats.length > 0 && <span style={{color:'var(--muted)',alignSelf:'center',fontSize:12}}>{chats.length} chats found</span>}
+          </div>
+          {err && <div className="alert alert-err" style={{marginTop:10}}>{err}</div>}
+        </div>
+
+        {chats.length > 0 && (
+          <div className="card">
+            <div className="selected-bar">
+              <div className="card-title" style={{marginBottom:0}}>
+                Select Chats <span className="badge badge-blue" style={{marginLeft:8}}>{selected.length} selected</span>
+              </div>
+              <div style={{display:'flex',gap:8}}>
+                <button className="btn btn-secondary btn-sm" onClick={selectAll}>Select All</button>
+                <button className="btn btn-secondary btn-sm" onClick={clearAll}>Clear</button>
+              </div>
+            </div>
+            <div className="search-row">
+              <input type="text" placeholder="🔍  Search chats…" value={search} onChange={e=>setSearch(e.target.value)} />
+            </div>
+            <div className="chat-list">
+              {filtered.map(c => (
+                <div key={c.id} className={`chat-item ${selected.includes(c.id)?'selected':''}`} onClick={()=>toggle(c.id)}>
+                  <div className={`chat-avatar ${c.type}`}>{c.name.charAt(0).toUpperCase()}</div>
+                  <div className="chat-info">
+                    <div className="chat-name">{c.name}</div>
+                    <div className="chat-meta">
+                      <span className={`badge badge-${c.type==='channel'?'blue':'green'}`}>{c.type}</span>
+                      {c.members && <span style={{marginLeft:6}}>{c.members.toLocaleString()} members</span>}
+                    </div>
+                  </div>
+                  <div className="chat-check">
+                    {selected.includes(c.id) && <span style={{color:'var(--bg)',fontSize:12}}>✓</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {selected.length > 0 && (
+              <div style={{marginTop:14}}>
+                <div className="sep"/>
+                <label>Save selection as list</label>
+                <div className="row-gap">
+                  <input type="text" placeholder="List name" value={saveListName} onChange={e=>setSaveListName(e.target.value)} style={{flex:1}} />
+                  <button className="btn btn-secondary btn-sm" onClick={doSaveList} disabled={!saveListName}>Save</button>
+                </div>
+                {msg && <div className="alert alert-ok" style={{marginTop:8}}>{msg}</div>}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="sidebar">
+        <div className="sidebar-title">💾 Saved Lists</div>
+        {lists.length === 0 && <p style={{color:'var(--muted)',fontSize:12}}>No saved lists yet</p>}
+        {lists.map(lst => (
+          <div key={lst.id} style={{marginBottom:10,padding:'10px',background:'var(--bg)',borderRadius:'var(--radius)',border:'1px solid var(--border)'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <span style={{fontSize:13}}>{lst.name}</span>
+              <button className="btn btn-secondary btn-sm" style={{padding:'3px 8px',fontSize:10}} onClick={()=>deleteList(lst.id)}>✕</button>
+            </div>
+            <div style={{fontSize:11,color:'var(--muted)',marginTop:4}}>{lst.chats.length} chats</div>
+            <button className="btn btn-secondary btn-sm" style={{marginTop:8,width:'100%'}} onClick={()=>loadSavedList(lst)}>→ Load</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Broadcast Page ───────────────────────────────────────────────────────────
+function BroadcastPage({ selected }) {
+  const [message, setMessage] = useState('');
+  const [delay, setDelay] = useState(5);
+  const [randomDelay, setRandomDelay] = useState(false);
+  const [maxPerMin, setMaxPerMin] = useState(10);
+  const [status, setStatus] = useState(null);
+  const [polling, setPolling] = useState(false);
+  const [templates, setTemplates] = useState([]);
+  const [tplName, setTplName] = useState('');
+  const [tplMsg, setTplMsg] = useState('');
+  const [tplTab, setTplTab] = useState(false);
+  const logRef = useRef(null);
+  const pollRef = useRef(null);
+
+  useEffect(() => { loadTemplates(); }, []);
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [status?.log]);
+
+  const loadTemplates = async () => {
+    const r = await api.get('/api/templates'); setTemplates(r.templates || []);
+  };
+
+  const startPoll = () => {
+    setPolling(true);
+    pollRef.current = setInterval(async () => {
+      const s = await api.get('/api/broadcast/status');
+      setStatus(s);
+      if (!s.running && s.finished) { clearInterval(pollRef.current); setPolling(false); }
+    }, 800);
+  };
+
+  const doStart = async () => {
+    if (!selected.length || !message.trim()) return;
+    await api.post('/api/broadcast/start', {
+      chat_ids: selected, message, delay, random_delay: randomDelay, max_per_minute: maxPerMin
+    });
+    startPoll();
+  };
+
+  const doStop = async () => {
+    await api.post('/api/broadcast/stop', {});
+  };
+
+  const doSaveTpl = async () => {
+    if (!tplName || !tplMsg) return;
+    await api.post('/api/templates', { name: tplName, text: tplMsg });
+    setTplName(''); setTplMsg(''); loadTemplates();
+  };
+
+  const progress = status ? Math.round((status.sent + status.failed) / (status.total || 1) * 100) : 0;
+
+  return (
+    <div className="main">
+      <div className="page">
+        {selected.length === 0 && (
+          <div className="alert alert-info" style={{marginBottom:16}}>
+            ← Select chats in the Chats tab first
+          </div>
+        )}
+
+        <div className="card">
+          <div className="card-title">📨 Compose Message</div>
+          <div style={{display:'flex',gap:8,marginBottom:10}}>
+            <button className="btn btn-secondary btn-sm" onClick={()=>setTplTab(false)} style={!tplTab?{borderColor:'var(--accent)',color:'var(--accent)'}:{}}>Compose</button>
+            <button className="btn btn-secondary btn-sm" onClick={()=>setTplTab(true)} style={tplTab?{borderColor:'var(--accent)',color:'var(--accent)'}:{}}>Templates</button>
+          </div>
+
+          {!tplTab ? (
+            <>
+              <textarea placeholder="Type your broadcast message here…" value={message} onChange={e=>setMessage(e.target.value)} style={{minHeight:130}} />
+              <div style={{fontSize:11,color:'var(--muted)',marginTop:4,textAlign:'right'}}>{message.length} chars · {selected.length} chats selected</div>
+            </>
+          ) : (
+            <div>
+              <div style={{marginBottom:10}}>
+                {templates.length === 0 && <p style={{color:'var(--muted)',fontSize:12}}>No templates saved yet</p>}
+                {templates.map(t => (
+                  <div key={t.id} style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,padding:'8px 10px',background:'var(--bg)',borderRadius:'var(--radius)',border:'1px solid var(--border)'}}>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:12,color:'var(--text)'}}>{t.name}</div>
+                      <div style={{fontSize:11,color:'var(--muted)',marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:300}}>{t.text}</div>
+                    </div>
+                    <button className="btn btn-secondary btn-sm" onClick={()=>{setMessage(t.text);setTplTab(false);}}>Use</button>
+                    <button className="btn btn-sm" style={{background:'transparent',color:'var(--muted)',border:'none',padding:'4px 6px'}} onClick={()=>api.del('/api/templates/'+t.id).then(loadTemplates)}>✕</button>
+                  </div>
+                ))}
+              </div>
+              <div className="sep"/>
+              <label>New Template Name</label>
+              <input type="text" placeholder="Template name" value={tplName} onChange={e=>setTplName(e.target.value)} />
+              <label>Message Text</label>
+              <textarea placeholder="Template message…" value={tplMsg} onChange={e=>setTplMsg(e.target.value)} style={{minHeight:80}} />
+              <div style={{marginTop:10}}>
+                <button className="btn btn-secondary btn-sm" onClick={doSaveTpl} disabled={!tplName||!tplMsg}>Save Template</button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="card">
+          <div className="card-title">⚙️ Broadcast Settings</div>
+          <div className="two-col">
+            <div>
+              <label>Delay (seconds)</label>
+              <input type="number" min="1" max="600" value={delay} onChange={e=>setDelay(Number(e.target.value))} />
+            </div>
+            <div>
+              <label>Max per minute</label>
+              <input type="number" min="1" max="30" value={maxPerMin} onChange={e=>setMaxPerMin(Number(e.target.value))} />
+            </div>
+          </div>
+          <div className="toggle-row">
+            <span className="toggle-label">Random delay (+0–10s)</span>
+            <label className="toggle">
+              <input type="checkbox" checked={randomDelay} onChange={e=>setRandomDelay(e.target.checked)} />
+              <span className="toggle-slider"/>
+            </label>
+          </div>
+          {randomDelay && <div style={{fontSize:11,color:'var(--muted)',marginTop:6}}>Will wait {delay}–{delay+10}s between messages</div>}
+        </div>
+
+        <div style={{display:'flex',gap:10}}>
+          <button className="btn btn-primary" style={{flex:1,justifyContent:'center'}}
+            onClick={doStart}
+            disabled={polling || !selected.length || !message.trim()}>
+            {polling ? <><span className="spinner"/> Broadcasting…</> : `🚀 Start Broadcast (${selected.length} chats)`}
+          </button>
+          {polling && (
+            <button className="btn btn-danger" onClick={doStop}>⏹ Stop</button>
+          )}
+        </div>
+
+        {status && (
+          <div className="card" style={{marginTop:16}}>
+            <div className="card-title">📊 Progress</div>
+            {status.current_chat && (
+              <div style={{marginBottom:10,display:'flex',alignItems:'center',gap:8}}>
+                <span className="spinner"/>
+                <span className="current-tag">Sending to: {status.current_chat}</span>
+              </div>
+            )}
+            <div className="progress-bar">
+              <div className="progress-fill" style={{width: progress + '%'}} />
+            </div>
+            <div style={{textAlign:'right',fontSize:11,color:'var(--muted)',marginBottom:12}}>{progress}% ({status.sent + status.failed}/{status.total})</div>
+            <div className="stats-row">
+              <div className="stat"><div className="stat-val val-blue">{status.total}</div><div className="stat-key">Total</div></div>
+              <div className="stat"><div className="stat-val val-green">{status.sent}</div><div className="stat-key">Sent</div></div>
+              <div className="stat"><div className="stat-val val-red">{status.failed}</div><div className="stat-key">Failed</div></div>
+            </div>
+            <div className="log-box" ref={logRef}>
+              {(status.log || []).map((l,i) => <div key={i} className="log-line">{l}</div>)}
+              {!status.running && status.finished && <div className="log-line" style={{color:'var(--green)',marginTop:8}}>━━ BROADCAST COMPLETE ━━</div>}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── History Page ─────────────────────────────────────────────────────────────
+function HistoryPage() {
+  const [history, setHistory] = useState([]);
+  useEffect(() => { api.get('/api/history').then(r => setHistory(r.history || [])); }, []);
+
+  return (
+    <div className="page">
+      <div className="card">
+        <div className="card-title">📜 Broadcast History</div>
+        {history.length === 0 ? (
+          <p style={{color:'var(--muted)',fontSize:12}}>No broadcasts yet</p>
+        ) : (
+          <div style={{overflowX:'auto'}}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Message</th>
+                  <th>Sent</th>
+                  <th>Failed</th>
+                  <th>Total</th>
+                  <th>Started</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map(h => (
+                  <tr key={h.id}>
+                    <td style={{maxWidth:240,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{h.message}</td>
+                    <td><span className="badge badge-green">{h.sent}</span></td>
+                    <td><span className={`badge ${h.failed>0?'badge-red':'badge-green'}`}>{h.failed}</span></td>
+                    <td>{h.total}</td>
+                    <td style={{color:'var(--muted)',fontSize:11}}>{h.started_at?.slice(0,16).replace('T',' ')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── App ──────────────────────────────────────────────────────────────────────
+function App() {
+  const [user, setUser] = useState(null);
+  const [tab, setTab] = useState('chats');
+  const [selected, setSelected] = useState([]);
+  const [checkingAuth, setCheckingAuth] = useState(false);
+  const [showSettings, setShowSettings] = useState(!sessionStorage.getItem('api_base'));
+
+  const tryAutoLogin = useCallback(() => {
+    setCheckingAuth(true);
+    fetch(API_BASE + '/api/me')
+      .then(r => r.ok ? r.json() : null)
+      .then(me => { if (me && me.name) setUser(me); })
+      .catch(() => {})
+      .finally(() => setCheckingAuth(false));
+  }, []);
+
+  const handleSettingsSave = () => {
+    setShowSettings(false);
+    tryAutoLogin();
+  };
+
+  useEffect(() => {
+    if (!showSettings) tryAutoLogin();
+  }, []);
+
+  const doLogout = async () => {
+    await api.post('/api/logout', {});
+    setUser(null); setSelected([]);
+  };
+
+  if (showSettings) return <SettingsScreen onSave={handleSettingsSave} />;
+
+  if (checkingAuth) return (
+    <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',gap:12}}>
+      <span className="spinner"/> <span style={{color:'var(--muted)'}}>Подключение…</span>
+    </div>
+  );
+
+  if (!user) return <LoginPage onAuth={setUser} />;
+
+  return (
+    <>
+      <div className="header">
+        <div className="header-logo">
+          <div className="logo-icon">📡</div>
+          <div>
+            <div className="logo-text">TG Broadcast</div>
+            <div className="logo-sub">Telethon User Client</div>
+          </div>
+        </div>
+        <div className="header-user">
+          <div className="status-dot"/>
+          <span>{user.name || user.username}</span>
+          <span style={{color:'var(--border)'}}>·</span>
+          <button className="btn btn-secondary btn-sm" onClick={()=>setShowSettings(true)} style={{marginRight:4}}>⚙️</button>
+          <button className="btn btn-secondary btn-sm" onClick={doLogout}>Выйти</button>
+        </div>
+      </div>
+      <div className="nav">
+        {[['chats','📂 Чаты'], ['broadcast','🚀 Рассылка'+(selected.length?` (${selected.length})`:'')], ['history','📜 История']].map(([k,l]) => (
+          <button key={k} className={`nav-btn ${tab===k?'active':''}`} onClick={()=>setTab(k)}>{l}</button>
+        ))}
+      </div>
+      <div style={{flex:1,overflow:'auto'}}>
+        {tab === 'chats' && <ChatsPage selected={selected} setSelected={setSelected} />}
+        {tab === 'broadcast' && <BroadcastPage selected={selected} />}
+        {tab === 'history' && <HistoryPage />}
+      </div>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body>
+</html>
