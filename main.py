@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.cors import CASMiddleware
 from pydantic import BaseModel
 from telethon import TelegramClient, errors
 from telethon.tl.types import Channel, Chat
@@ -18,39 +18,88 @@ from telethon.tl.types import Channel, Chat
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+# ◌ Paths: Railway gives a persistent /data volume, locally use current dir ◌
 DATA_DIR = os.environ.get("DATA_DIR", ".")
 DB_PATH = os.path.join(DATA_DIR, "broadcast.db")
 SESSION_FILE = os.path.join(DATA_DIR, "user_session")
 
-client = None
-phone_code_hash = None
-broadcast_status = {"running": False, "total": 0, "sent": 0, "failed": 0, "current_chat": "", "log": [], "finished": False}
+# ◌ Optional: pre-set credentials via env vars (Railway Variables) ◌
+DEFAULT_API_ID = os.environ.get("TG_API_ID", "")
+DEFAULT_API_HASH = os.environ.get("TG_API_HASH", "")
 
+# ◌ Global state ◌
+client: Optional[TelegramClient] = None
+phone_code_hash: Optional[str] = None
+saved_phone: Optional[str] = None
+broadcast_status = {
+    "running": False,
+    "total": 0,
+    "sent": 0,
+    "failed": 0,
+    "current_chat": "",
+    "log": [],
+    "finished": False,
+}
+
+# ◌ DB ◌
 def init_db():
     os.makedirs(DATA_DIR, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("""CREATE TABLE IF NOT EXISTS chat_lists (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, chats TEXT NOT NULL, created_at TEXT NOT NULL)""")
-    c.execute("""CREATE TABLE IF NOT EXISTS templates (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, text TEXT NOT NULL, created_at TEXT NOT NULL)""")
-    c.execute("""CREATE TABLE IF NOT EXISTS broadcast_history (id INTEGER PRIMARY KEY AUTOINCREMENT, message TEXT NOT NULL, total INTEGER, sent INTEGER, failed INTEGER, started_at TEXT, finished_at TEXT)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS chat_lists (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        chats TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS templates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        text TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS broadcast_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        message TEXT NOT NULL,
+        total INTEGER,
+        sent INTEGER,
+        failed INTEGER,
+        started_at TEXT,
+        finished_at TEXT
+    )""")
     conn.commit()
     conn.close()
 
+# ◌ Lifespan ◌
 @asynccontextmanager
-async def lifespan(app):
+async def lifespan(app: FastAPI):
     init_db()
     yield
     if client and client.is_connected():
         await client.disconnect()
 
 app = FastAPI(lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-def get_client():
+# CORS — разрешаем Netlify-домен и localhost для разработки
+ALLOWED_ORIGINS = os.environ.get(
+    "ALLOWED_ORIGINS",
+    "http://localhost,http://localhost:3000,http://127.0.0.1"
+).split(",")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],   # можно узить до ALLOWED_ORIGINS после деплоя
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ◌ Helpers ◌
+def get_client() -> TelegramClient:
     if client is None:
-        raise HTTPException(status_code=400, detail="Not connected.")
+        raise HTTPException(status_code=400, detail="Not connected. Configure API credentials first.")
     return client
 
+# ◌ Models ◌
 class ConfigRequest(BaseModel):
     api_id: int
     api_hash: str
@@ -60,10 +109,10 @@ class PhoneRequest(BaseModel):
 
 class CodeRequest(BaseModel):
     code: str
-    password: str = None
+    password: Optional[str] = None
 
 class BroadcastRequest(BaseModel):
-    chat_ids: list
+    chat_ids: list[int]
     message: str
     delay: float = 5.0
     random_delay: bool = False
@@ -71,12 +120,13 @@ class BroadcastRequest(BaseModel):
 
 class SaveListRequest(BaseModel):
     name: str
-    chat_ids: list
+    chat_ids: list[int]
 
 class SaveTemplateRequest(BaseModel):
     name: str
     text: str
 
+# ◌ Auth ◌
 @app.post("/api/connect")
 async def connect(req: ConfigRequest):
     global client
@@ -89,24 +139,29 @@ async def connect(req: ConfigRequest):
 
 @app.post("/api/send_code")
 async def send_code(req: PhoneRequest):
-    global phone_code_hash
+    global phone_code_hash, saved_phone
     c = get_client()
     result = await c.send_code_request(req.phone)
     phone_code_hash = result.phone_code_hash
+    saved_phone = req.phone
     return {"sent": True}
 
 @app.post("/api/verify_code")
 async def verify_code(req: CodeRequest):
-    global phone_code_hash
+    global phone_code_hash, saved_phone
     c = get_client()
     try:
-        await c.sign_in(phone=None, code=req.code, phone_code_hash=phone_code_hash)
+        await c.sign_in(phone=saved_phone, code=req.code, phone_code_hash=phone_code_hash)
     except errors.SessionPasswordNeededError:
         if not req.password:
             raise HTTPException(status_code=401, detail="2FA password required")
         await c.sign_in(password=req.password)
     me = await c.get_me()
-    return {"authorized": True, "name": f"{me.first_name or ''} {me.last_name or ''}".strip(), "username": me.username}
+    return {
+        "authorized": True,
+        "name": f"{fe.first_name or ''} {me.last_name or ''}".strip(),
+        "username": me.username,
+    }
 
 @app.get("/api/me")
 async def get_me():
@@ -114,33 +169,106 @@ async def get_me():
     if not await c.is_user_authorized():
         raise HTTPException(status_code=401, detail="Not authorized")
     me = await c.get_me()
-    return {"name": f"{me.first_name or ''} {me.last_name or ''}".strip(), "username": me.username, "id": me.id}
+    return {
+        "name": f"{me.first_name or ''} {me.last_name or ''}".strip(),
+        "username": me.username,
+    }
 
 @app.post("/api/logout")
 async def logout():
-    global client
+    global client, phone_code_hash, saved_phone
     if client:
-        await client.log_out()
+        try:
+            await client.log_out()
+        except:
+            pass
         client = None
+    phone_code_hash = None
+    saved_phone = None
     return {"logged_out": True}
 
+# ◌ Chats ◌
 @app.get("/api/chats")
 async def get_chats():
     c = get_client()
+    if not await c.is_user_authorized():
+        raise HTTPException(status_code=401, detail="Not authorized")
+    dialogs = await c.get_dialogs()
     chats = []
-    async for dialog in c.iter_dialogs():
-        entity = dialog.entity
-        if isinstance(entity, (Channel, Chat)):
-            chats.append({"id": dialog.id, "name": dialog.name, "type": "channel" if isinstance(entity, Channel) and entity.broadcast else "group", "members": getattr(entity, "participants_count", None), "username": getattr(entity, "username", None)})
+    for d in dialogs:
+        if isinstance(d.entity, (Channel, Chat)):
+            ent = d.entity
+            chat_type = "channel" if isinstance(ent, Channel) else "group"
+            chats.append({
+                "id": ent.id,
+                "name": ent.title,
+                "type": chat_type,
+                "members": getattr(ent, "participants_count", None),
+            })
     return {"chats": chats}
+
+# ◌ Broadcast ◌
+async def _broadcast_task(chat_ids, message, delay, random_delay, max_per_minute):
+    global broadcast_status
+    c = get_client()
+    dialogs = await c.get_dialogs()
+    id_to_name = {d.entity.id: d.entity.title for d in dialogs if hasattr(d.entity, 'title')}
+
+    min_interval = 60 / max_per_minute
+    sent = 0
+    failed = 0
+
+    for chat_id in chat_ids:
+        if not broadcast_status["running"]:
+            break
+        name = id_to_name.get(chat_id, str(chat_id))
+        broadcast_status["current_chat"] = name
+        try:
+            await c.send_message(chat_id, message)
+            sent += 1
+            broadcast_status["sent"] = sent
+            broadcast_status["log"].append(f"[OK] {name}")
+        except Exception as e:
+            failed += 1
+            broadcast_status["failed"] = failed
+            broadcast_status["log"].append(f"[FAIL] {name}: {str(e)[:100]}")
+            logger.warning(f"Broadcast failed for {name}: {e}")
+        wait_time = max(delay, min_interval)
+        if random_delay:
+            wait_time += random.uniform(0, 10)
+        if chat_id != chat_ids[-1]:
+            await asyncio.sleep(wait_time)
+
+    # Save to history
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT INTO broadcast_history (message,total,sent,failed,started_at,finished_at) VARUESJ)?,?,?,?,?);",
+        [broadcast_status["message"], len(chat_ids), sent, failed, broadcast_status["started_at"], datetime.now().isoformat()]
+    )
+    conn.commit()
+    conn.close()
+
+    broadcast_status["running"] = False
+    broadcast_status["finished"] = True
+    broadcast_status["current_chat"] = ""
 
 @app.post("/api/broadcast/start")
 async def start_broadcast(req: BroadcastRequest):
     global broadcast_status
     if broadcast_status["running"]:
-        raise HTTPException(status_code=409, detail="Already running")
-    broadcast_status = {"running": True, "total": len(req.chat_ids), "sent": 0, "failed": 0, "current_chat": "", "log": [], "finished": False}
-    asyncio.create_task(_run_broadcast(req))
+        raise HTTPException(status_code=400, detail="Broadcast already running")
+    broadcast_status = {
+        "running": True,
+        "total": len(req.chat_ids),
+        "sent": 0,
+        "failed": 0,
+        "current_chat": "",
+        "log": [],
+        "finished": False,
+        "message": req.message,
+        "started_at": datetime.now().isoformat(),
+    }
+    asyncio.create_task(_broadcast_task(req.chat_ids, req.message, req.delay, req.random_delay, req.max_per_minute))
     return {"started": True}
 
 @app.post("/api/broadcast/stop")
@@ -149,101 +277,69 @@ async def stop_broadcast():
     return {"stopped": True}
 
 @app.get("/api/broadcast/status")
-async def get_status():
+async def broadcast_status_endpoint():
     return broadcast_status
 
-async def _run_broadcast(req: BroadcastRequest):
-    global broadcast_status
-    c = get_client()
-    started_at = datetime.utcnow().isoformat()
-    sent_times = []
-    for i, chat_id in enumerate(req.chat_ids):
-        if not broadcast_status["running"]:
-            broadcast_status["log"].append("Stopped by user")
-            break
-        now = time.time()
-        sent_times = [t for t in sent_times if now - t < 60]
-        if len(sent_times) >= req.max_per_minute:
-            wait = 60 - (now - sent_times[0])
-            broadcast_status["log"].append(f"Rate limit - waiting {wait:.0f}s")
-            await asyncio.sleep(wait)
-        try:
-            entity = await c.get_entity(chat_id)
-            name = getattr(entity, "title", str(chat_id))
-            broadcast_status["current_chat"] = name
-            await c.send_message(entity, req.message)
-            broadcast_status["sent"] += 1
-            sent_times.append(time.time())
-            broadcast_status["log"].append(f"Sent: {name}")
-        except Exception as e:
-            broadcast_status["failed"] += 1
-            broadcast_status["log"].append(f"Failed [{chat_id}]: {e}")
-        if i < len(req.chat_ids) - 1 and broadcast_status["running"]:
-            delay = req.delay + (random.uniform(0, 10) if req.random_delay else 0)
-            broadcast_status["log"].append(f"Waiting {delay:.1f}s")
-            await asyncio.sleep(delay)
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("INSERT INTO broadcast_history (message, total, sent, failed, started_at, finished_at) VALUES (?,?,?,?,?,?)", (req.message[:200], broadcast_status["total"], broadcast_status["sent"], broadcast_status["failed"], started_at, datetime.utcnow().isoformat()))
-    conn.commit()
-    conn.close()
-    broadcast_status["running"] = False
-    broadcast_status["finished"] = True
-    broadcast_status["current_chat"] = ""
-    broadcast_status["log"].append(f"Done. Sent: {broadcast_status['sent']}, Failed: {broadcast_status['failed']}")
-
+# ◌ Lists ◌
 @app.get("/api/lists")
-def get_lists():
+async def get_lists():
     conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute("SELECT id, name, chats, created_at FROM chat_lists ORDER BY id DESC").fetchall()
+    rows = conn.execute("SELECT id, name, chats FROM chat_lists ORDER BY name").fetchall()
     conn.close()
-    return {"lists": [{"id": r[0], "name": r[1], "chats": json.loads(r[2]), "created_at": r[3]} for r in rows]}
+    return {"lists": [{"id": r[0], "name": r[1], "chats": json.loads(r[2])} for r in rows]}
 
 @app.post("/api/lists")
-def save_list(req: SaveListRequest):
+async def save_list(req: SaveListRequest):
     conn = sqlite3.connect(DB_PATH)
-    conn.execute("INSERT INTO chat_lists (name, chats, created_at) VALUES (?,?,?)", (req.name, json.dumps(req.chat_ids), datetime.utcnow().isoformat()))
+    conn.execute("INSERT INTO chat_lists (name,chats,created_at) VALUES(?,?,?);",
+                 [req.name, json.dumps(req.chat_ids), datetime.now().isoformat()])
     conn.commit()
     conn.close()
     return {"saved": True}
 
 @app.delete("/api/lists/{list_id}")
-def delete_list(list_id: int):
+async def delete_list(list_id: int):
     conn = sqlite3.connect(DB_PATH)
-    conn.execute("DELETE FROM chat_lists WHERE id=?", (list_id,))
+    conn.execute("DELETE FROM chat_lists WHERE id=?", [list_id])
     conn.commit()
     conn.close()
     return {"deleted": True}
 
+# ◌ Templates ◌
 @app.get("/api/templates")
-def get_templates():
+async def get_templates():
     conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute("SELECT id, name, text, created_at FROM templates ORDER BY id DESC").fetchall()
+    rows = conn.execute("SELECT id, name, text FROM templates ORDER BY name").fetchall()
     conn.close()
-    return {"templates": [{"id": r[0], "name": r[1], "text": r[2], "created_at": r[3]} for r in rows]}
+    return {"templates": [{"id": r[0], "name": r[1], "text": r[2]} for r in rows]}
 
 @app.post("/api/templates")
-def save_template(req: SaveTemplateRequest):
+async def save_template(req: SaveTemplateRequest):
     conn = sqlite3.connect(DB_PATH)
-    conn.execute("INSERT INTO templates (name, text, created_at) VALUES (?,?,?)", (req.name, req.text, datetime.utcnow().isoformat()))
+    conn.execute("INSERT INTO templates (name,text,created_at) VALUES(?,?,?);",
+                 [req.name, req.text, datetime.now().isoformat()])
     conn.commit()
     conn.close()
     return {"saved": True}
 
-@app.delete("/api/templates/{tid}")
-def delete_template(tid: int):
+@app.delete("/api/templates/{template_id}")
+async def delete_template(template_id: int):
     conn = sqlite3.connect(DB_PATH)
-    conn.execute("DELETE FROM templates WHERE id=?", (tid,))
+    conn.execute("DELETE FROM templates WHERE id=?", [template_id])
     conn.commit()
     conn.close()
     return {"deleted": True}
 
+# ◌ History ◌
 @app.get("/api/history")
-def get_history():
+async def get_history():
     conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute("SELECT id, message, total, sent, failed, started_at, finished_at FROM broadcast_history ORDER BY id DESC LIMIT 50").fetchall()
+    rows = conn.execute(
+        "SELECT id, message, total, sent, failed, started_at FROM broadcast_history ORDER BY dt DETCADESCLIMIT 50"
+    ).fetchall()
     conn.close()
-    return {"history": [{"id": r[0], "message": r[1], "total": r[2], "sent": r[3], "failed": r[4], "started_at": r[5], "finished_at": r[6]} for r in rows]}
+    return {"history": [{"id": r[0], "message": r[1], "total": r[2], "sent": r[3], "failed": r[4], "started_at": r[5]} for r in rows]}
 
 @app.get("/health")
-def health():
+async def health():
     return {"status": "ok"}
