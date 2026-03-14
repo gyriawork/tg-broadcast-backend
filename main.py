@@ -141,6 +141,31 @@ def init_db():
     conn.close()
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
+async def _sqlite_backup_loop():
+    """Daily SQLite backup to /data/backups/"""
+    backup_dir = os.path.join(DATA_DIR, "backups")
+    os.makedirs(backup_dir, exist_ok=True)
+    while True:
+        await asyncio.sleep(86400)  # 24h
+        try:
+            ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            dst = os.path.join(backup_dir, f"broadcast_{ts}.db")
+            src_conn = sqlite3.connect(DB_PATH)
+            dst_conn = sqlite3.connect(dst)
+            src_conn.backup(dst_conn)
+            src_conn.close()
+            dst_conn.close()
+            # Keep only last 7 backups
+            backups = sorted(
+                [f for f in os.listdir(backup_dir) if f.endswith(".db")],
+                reverse=True
+            )
+            for old in backups[7:]:
+                os.remove(os.path.join(backup_dir, old))
+            logger.info(f"SQLite backup saved: {dst}")
+        except Exception as e:
+            logger.error(f"SQLite backup failed: {e}")
+
 async def _cleanup_old_uploads():
     """Delete upload folders older than UPLOAD_TTL_HOURS. Runs every hour."""
     while True:
@@ -163,7 +188,28 @@ async def _cleanup_old_uploads():
 async def lifespan(app: FastAPI):
     init_db()
     asyncio.create_task(_cleanup_old_uploads())
+    asyncio.create_task(_sqlite_backup_loop())
     yield
+    # Graceful shutdown: stop running broadcasts and save to history
+    for token, status in list(broadcast_statuses.items()):
+        if status.get("running"):
+            status["running"] = False
+            status["finished"] = True
+            status["log"].append("Stopped: server shutdown")
+            try:
+                conn = sqlite3.connect(DB_PATH)
+                conn.execute(
+                    """INSERT INTO broadcast_history
+                       (message, total, sent, failed, started_at, finished_at, tg_session_token, log)
+                       VALUES (?,?,?,?,?,?,?,?)""",
+                    ("(shutdown)", status["total"], status["sent"], status["failed"],
+                     datetime.utcnow().isoformat(), datetime.utcnow().isoformat(),
+                     token, json.dumps(status["log"]))
+                )
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                logger.error(f"Shutdown save failed: {e}")
     for c in tg_clients.values():
         if c.is_connected():
             await c.disconnect()
@@ -484,6 +530,10 @@ class BroadcastRequest(BaseModel):
     # Admin-only: broadcast using another user's TG session
     as_session_token: Optional[str] = None
 
+    def validate_message(self):
+        if self.message and len(self.message) > 4096:
+            raise HTTPException(status_code=400, detail="Message exceeds 4096 characters (Telegram limit)")
+
 @app.post("/api/broadcast/start")
 async def start_broadcast(req: BroadcastRequest,
                           token: str = Depends(get_tg_session_token),
@@ -493,6 +543,7 @@ async def start_broadcast(req: BroadcastRequest,
     if req.as_session_token and app_user.get("role") == "admin":
         effective_token = req.as_session_token
 
+    req.validate_message()
     status = get_broadcast_status(effective_token)
     if status["running"]:
         raise HTTPException(status_code=409, detail="Broadcast already running")
@@ -735,7 +786,24 @@ async def broadcast_stream(request: Request,
         }
     )
 
+# ── Admin: manual backup ─────────────────────────────────────────────────────
+@app.post("/api/admin/backup")
+async def manual_backup(admin: dict = Depends(require_admin)):
+    backup_dir = os.path.join(DATA_DIR, "backups")
+    os.makedirs(backup_dir, exist_ok=True)
+    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    dst = os.path.join(backup_dir, f"broadcast_{ts}.db")
+    src_conn = sqlite3.connect(DB_PATH)
+    dst_conn = sqlite3.connect(dst)
+    src_conn.backup(dst_conn)
+    src_conn.close()
+    dst_conn.close()
+    size = os.path.getsize(dst)
+    return {"backup": dst, "size_bytes": size, "created_at": ts}
+
 # ── Health ────────────────────────────────────────────────────────────────────
 @app.get("/health")
 def health():
-    return {"status": "ok", "sessions": len(tg_clients)}
+    backup_dir = os.path.join(DATA_DIR, "backups")
+    backups = sorted(os.listdir(backup_dir)) if os.path.exists(backup_dir) else []
+    return {"status": "ok", "sessions": len(tg_clients), "last_backup": backups[-1] if backups else None}
