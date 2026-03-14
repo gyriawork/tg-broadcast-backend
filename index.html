@@ -196,7 +196,7 @@ const F = React.Fragment;
 
 // ── API config ──────────────────────────────────────────────────────────────
 function getApiBase() {
-  return sessionStorage.getItem('api_base') || 'http://localhost:8000';
+  return sessionStorage.getItem('api_base') || 'https://web-production-b8b8b.up.railway.app';
 }
 let API_BASE = getApiBase();
 let JWT_TOKEN = sessionStorage.getItem('jwt_token') || '';
