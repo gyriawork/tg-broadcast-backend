@@ -14,8 +14,8 @@ from typing import Optional
 import bcrypt
 import jwt as pyjwt
 
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Depends, Header
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Depends, Header, Query
+from fastapi.responses import StreamingResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -42,6 +42,12 @@ bearer_scheme = HTTPBearer(auto_error=False)
 MAX_UPLOAD_BYTES  = 50 * 1024 * 1024   # 50 MB hard limit
 UPLOAD_TTL_HOURS  = 24                  # auto-delete files older than 24h
 
+# ── Slack OAuth config ───────────────────────────────────────────────────────
+SLACK_CLIENT_ID     = os.environ.get("SLACK_CLIENT_ID", "")
+SLACK_CLIENT_SECRET = os.environ.get("SLACK_CLIENT_SECRET", "")
+SLACK_REDIRECT_URI  = os.environ.get("SLACK_REDIRECT_URI", "")
+SLACK_BOT_SCOPES    = "channels:read,groups:read,chat:write,files:write"
+
 # ── Login rate limiting ───────────────────────────────────────────────────────
 _login_attempts: dict[str, list[float]] = {}   # ip -> [timestamps]
 LOGIN_WINDOW_SEC  = 60
@@ -66,6 +72,8 @@ uploaded_files:     dict[str, dict]         = {}
 # ── Slack per-session state ──────────────────────────────────────────────────
 slack_clients:  dict[str, WebClient] = {}   # session_token -> WebClient
 slack_sessions: dict[str, dict]      = {}   # session_token -> {team_name, bot_user_id, ...}
+_oauth_states:  dict[str, int]       = {}   # state -> app_user_id (for CSRF protection)
+tg_session_owners: dict[str, int]    = {}   # tg session_token -> app_user_id
 
 # ── DB ────────────────────────────────────────────────────────────────────────
 def init_db():
@@ -453,7 +461,7 @@ class CodeRequest(BaseModel):
     password: Optional[str] = None
 
 @app.post("/api/connect")
-async def connect(req: ConfigRequest, _: dict = Depends(get_current_app_user)):
+async def connect(req: ConfigRequest, app_user: dict = Depends(get_current_app_user)):
     token = req.session_token or secrets.token_hex(16)
     if token in tg_clients and tg_clients[token].is_connected():
         await tg_clients[token].disconnect()
@@ -461,6 +469,7 @@ async def connect(req: ConfigRequest, _: dict = Depends(get_current_app_user)):
     c = TelegramClient(session_path, req.api_id, req.api_hash)
     await c.connect()
     tg_clients[token] = c
+    tg_session_owners[token] = int(app_user["sub"])
     is_auth = await c.is_user_authorized()
     return {"connected": True, "authorized": is_auth, "session_token": token}
 
@@ -1210,6 +1219,470 @@ def delete_slack_list(list_id: int, app_user: dict = Depends(get_current_app_use
         conn.execute("DELETE FROM chat_lists WHERE id=? AND channel_type='slack'", (list_id,))
     else:
         conn.execute("DELETE FROM chat_lists WHERE id=? AND channel_type='slack' AND owner_app_user_id=?",
+                     (list_id, int(app_user["sub"])))
+    conn.commit()
+    conn.close()
+    return {"deleted": True}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# ── Slack OAuth flow ─────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/slack/oauth/start")
+def slack_oauth_start(app_user: dict = Depends(get_current_app_user)):
+    if not SLACK_CLIENT_ID or not SLACK_REDIRECT_URI:
+        raise HTTPException(status_code=500, detail="Slack OAuth not configured (set SLACK_CLIENT_ID, SLACK_CLIENT_SECRET, SLACK_REDIRECT_URI)")
+    state = secrets.token_hex(16)
+    _oauth_states[state] = int(app_user["sub"])
+    url = (
+        f"https://slack.com/oauth/v2/authorize"
+        f"?client_id={SLACK_CLIENT_ID}"
+        f"&scope={SLACK_BOT_SCOPES}"
+        f"&redirect_uri={SLACK_REDIRECT_URI}"
+        f"&state={state}"
+    )
+    return {"url": url, "state": state}
+
+@app.get("/api/slack/oauth/callback")
+async def slack_oauth_callback(code: str = Query(...), state: str = Query("")):
+    app_user_id = _oauth_states.pop(state, None)
+    if app_user_id is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+    try:
+        resp = await asyncio.to_thread(
+            lambda: WebClient().oauth_v2_access(
+                client_id=SLACK_CLIENT_ID,
+                client_secret=SLACK_CLIENT_SECRET,
+                code=code,
+                redirect_uri=SLACK_REDIRECT_URI,
+            )
+        )
+    except SlackApiError as e:
+        raise HTTPException(status_code=400, detail=f"Slack OAuth failed: {e.response.get('error', str(e))}")
+
+    access_token = resp.get("access_token", "")
+    team_name = resp.get("team", {}).get("name", "")
+    team_id = resp.get("team", {}).get("id", "")
+    bot_user_id = resp.get("bot_user_id", "")
+
+    session_token = secrets.token_hex(16)
+    client = WebClient(token=access_token)
+    slack_clients[session_token] = client
+    slack_sessions[session_token] = {
+        "team_id": team_id, "team_name": team_name,
+        "bot_user_id": bot_user_id, "app_user_id": app_user_id,
+    }
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        """INSERT INTO slack_connections
+           (session_token, bot_token, team_id, team_name, bot_user_id, app_user_id, created_at)
+           VALUES (?,?,?,?,?,?,?)""",
+        (session_token, access_token, team_id, team_name, bot_user_id,
+         app_user_id, datetime.utcnow().isoformat())
+    )
+    conn.commit()
+    conn.close()
+    logger.info(f"Slack OAuth success: {team_name} for user {app_user_id}")
+
+    return RedirectResponse(f"/?slack_connected={session_token}")
+
+# ═════════════════════════════════════════════════════════════════════════════
+# ── Unified endpoints ────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/integrations/status")
+async def integrations_status(app_user: dict = Depends(get_current_app_user)):
+    user_id = int(app_user["sub"])
+    # TG status
+    tg_info = {"connected": False}
+    for token, owner_id in tg_session_owners.items():
+        if owner_id == user_id and token in tg_clients:
+            c = tg_clients[token]
+            try:
+                if c.is_connected() and await c.is_user_authorized():
+                    me = await c.get_me()
+                    tg_info = {
+                        "connected": True,
+                        "name": f"{me.first_name or ''} {me.last_name or ''}".strip(),
+                        "phone": saved_phones.get(token, ""),
+                        "session_token": token,
+                    }
+                    break
+            except:
+                pass
+    # Slack status
+    slack_info = {"connected": False}
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute(
+        "SELECT session_token, team_name FROM slack_connections WHERE app_user_id=? ORDER BY id DESC LIMIT 1",
+        (user_id,)
+    ).fetchone()
+    conn.close()
+    if row and row[0] in slack_clients:
+        slack_info = {
+            "connected": True,
+            "team": row[1],
+            "session_token": row[0],
+        }
+    return {"telegram": tg_info, "slack": slack_info}
+
+@app.get("/api/unified/chats")
+async def get_unified_chats(app_user: dict = Depends(get_current_app_user)):
+    user_id = int(app_user["sub"])
+    chats = []
+
+    # TG chats
+    for token, owner_id in tg_session_owners.items():
+        if owner_id != user_id or token not in tg_clients:
+            continue
+        c = tg_clients[token]
+        try:
+            if not c.is_connected() or not await c.is_user_authorized():
+                continue
+            async for dialog in c.iter_dialogs():
+                entity = dialog.entity
+                if isinstance(entity, Channel):
+                    chat_type = "channel" if entity.broadcast else "group"
+                    name = entity.title
+                    members = getattr(entity, "participants_count", 0) or 0
+                elif isinstance(entity, Chat):
+                    chat_type = "group"
+                    name = entity.title
+                    members = getattr(entity, "participants_count", 0) or 0
+                elif isinstance(entity, TgUser) and not entity.bot:
+                    chat_type = "dm"
+                    name = f"{entity.first_name or ''} {entity.last_name or ''}".strip() or str(entity.id)
+                    members = 0
+                else:
+                    continue
+                chats.append({
+                    "id": f"tg:{entity.id}",
+                    "raw_id": entity.id,
+                    "name": name,
+                    "platform": "telegram",
+                    "type": chat_type,
+                    "members": members,
+                    "session_token": token,
+                })
+        except Exception as e:
+            logger.warning(f"Failed to load TG chats for token {token[:8]}: {e}")
+
+    # Slack chats
+    conn = sqlite3.connect(DB_PATH)
+    slack_rows = conn.execute(
+        "SELECT session_token FROM slack_connections WHERE app_user_id=?", (user_id,)
+    ).fetchall()
+    conn.close()
+    for (s_token,) in slack_rows:
+        client = slack_clients.get(s_token)
+        if not client:
+            continue
+        try:
+            cursor = None
+            while True:
+                kwargs = {"types": "public_channel,private_channel", "limit": 200}
+                if cursor:
+                    kwargs["cursor"] = cursor
+                resp = await asyncio.to_thread(lambda kw=kwargs: client.conversations_list(**kw))
+                for ch in resp.get("channels", []):
+                    chats.append({
+                        "id": f"slack:{ch['id']}",
+                        "raw_id": ch["id"],
+                        "name": ch.get("name", ""),
+                        "platform": "slack",
+                        "type": "private_channel" if ch.get("is_private") else "channel",
+                        "members": ch.get("num_members", 0),
+                        "is_member": ch.get("is_member", False),
+                        "session_token": s_token,
+                    })
+                cursor = resp.get("response_metadata", {}).get("next_cursor", "")
+                if not cursor:
+                    break
+        except Exception as e:
+            logger.warning(f"Failed to load Slack channels for token {s_token[:8]}: {e}")
+
+    return {"chats": chats}
+
+# ── Unified broadcast ────────────────────────────────────────────────────────
+
+class UnifiedBroadcastRequest(BaseModel):
+    chat_ids: list[str]              # ["tg:123", "slack:C01ABC", ...]
+    message: Optional[str] = None
+    delay: float = 3.0
+    random_delay: bool = False
+    max_per_minute: int = 15
+
+@app.post("/api/unified/broadcast/start")
+async def unified_broadcast_start(req: UnifiedBroadcastRequest,
+                                  app_user: dict = Depends(get_current_app_user)):
+    if not req.chat_ids:
+        raise HTTPException(status_code=400, detail="No chats selected")
+    if req.message and len(req.message) > 4096:
+        raise HTTPException(status_code=400, detail="Message exceeds 4096 characters")
+
+    user_id = int(app_user["sub"])
+    broadcast_id = f"unified_{secrets.token_hex(8)}"
+
+    # Build chat_map: resolve each prefixed ID to platform + client
+    chat_map = {}
+    for cid in req.chat_ids:
+        if cid.startswith("tg:"):
+            raw_id = int(cid[3:])
+            # Find user's TG session
+            session_token = None
+            for token, owner_id in tg_session_owners.items():
+                if owner_id == user_id and token in tg_clients:
+                    session_token = token
+                    break
+            if not session_token:
+                continue
+            chat_map[cid] = {"platform": "telegram", "raw_id": raw_id, "session_token": session_token}
+        elif cid.startswith("slack:"):
+            raw_id = cid[6:]
+            conn = sqlite3.connect(DB_PATH)
+            row = conn.execute(
+                "SELECT session_token FROM slack_connections WHERE app_user_id=? ORDER BY id DESC LIMIT 1",
+                (user_id,)
+            ).fetchone()
+            conn.close()
+            if row and row[0] in slack_clients:
+                chat_map[cid] = {"platform": "slack", "raw_id": raw_id, "session_token": row[0]}
+
+    if not chat_map:
+        raise HTTPException(status_code=400, detail="No valid chats resolved. Check integrations.")
+
+    status = get_broadcast_status(broadcast_id)
+    if status["running"]:
+        raise HTTPException(status_code=409, detail="Broadcast already running")
+
+    broadcast_statuses[broadcast_id] = {
+        "running": True, "total": len(chat_map), "sent": 0, "failed": 0,
+        "current_chat": "", "log": [], "finished": False,
+    }
+    asyncio.create_task(_run_unified_broadcast(req, broadcast_id, app_user, chat_map))
+    return {"started": True, "broadcast_id": broadcast_id}
+
+@app.post("/api/unified/broadcast/stop")
+async def unified_broadcast_stop(broadcast_id: str = Query(...),
+                                 _: dict = Depends(get_current_app_user)):
+    if broadcast_id in broadcast_statuses:
+        broadcast_statuses[broadcast_id]["running"] = False
+    return {"stopped": True}
+
+@app.get("/api/unified/broadcast/status")
+async def unified_broadcast_status_ep(broadcast_id: str = Query(...),
+                                      _: dict = Depends(get_current_app_user)):
+    return get_broadcast_status(broadcast_id)
+
+@app.get("/api/unified/broadcast/stream")
+async def unified_broadcast_stream(request: Request,
+                                   broadcast_id: str = Query(...),
+                                   jwt: Optional[str] = None):
+    if jwt:
+        decode_jwt(jwt)
+    else:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            decode_jwt(auth[7:])
+        else:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+
+    async def event_generator():
+        last_sent = 0
+        last_log_len = 0
+        while True:
+            status = get_broadcast_status(broadcast_id)
+            log_len = len(status.get("log", []))
+            if log_len != last_log_len or status.get("sent", 0) != last_sent:
+                last_sent = status.get("sent", 0)
+                last_log_len = log_len
+                data = json.dumps({
+                    "running": status["running"],
+                    "finished": status["finished"],
+                    "total": status["total"],
+                    "sent": status["sent"],
+                    "failed": status["failed"],
+                    "current_chat": status["current_chat"],
+                    "log": status["log"][-20:],
+                })
+                yield f"data: {data}\n\n"
+            if not status["running"] and status["finished"]:
+                yield f"data: {json.dumps({**status, 'log': status['log'][-20:]})}\n\n"
+                break
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+async def _run_unified_broadcast(req: UnifiedBroadcastRequest, broadcast_id: str,
+                                 app_user: dict, chat_map: dict):
+    status = broadcast_statuses[broadcast_id]
+    started_at = datetime.utcnow().isoformat()
+    sent_times = []
+    uf = None  # TODO: unified file upload support
+
+    ordered_ids = list(chat_map.keys())
+    for i, chat_id in enumerate(ordered_ids):
+        if not status["running"]:
+            status["log"].append("Stopped by user")
+            break
+
+        now = time.time()
+        sent_times = [t for t in sent_times if now - t < 60]
+        if len(sent_times) >= req.max_per_minute:
+            wait = 60 - (now - sent_times[0])
+            status["log"].append(f"Rate limit — waiting {wait:.0f}s")
+            await asyncio.sleep(wait)
+
+        info = chat_map[chat_id]
+        platform = info["platform"]
+        raw_id = info["raw_id"]
+        s_token = info["session_token"]
+
+        try:
+            if platform == "telegram":
+                client = tg_clients.get(s_token)
+                if not client:
+                    raise Exception("TG session not found")
+                entity = await client.get_entity(raw_id)
+                name = getattr(entity, "title", str(raw_id))
+                status["current_chat"] = f"{name} (TG)"
+                if uf and os.path.exists(uf["path"]):
+                    await client.send_file(entity, uf["path"], caption=req.message or None)
+                else:
+                    await client.send_message(entity, req.message)
+
+            elif platform == "slack":
+                client = slack_clients.get(s_token)
+                if not client:
+                    raise Exception("Slack session not found")
+                ch_info = await asyncio.to_thread(client.conversations_info, channel=raw_id)
+                name = ch_info["channel"].get("name", raw_id)
+                status["current_chat"] = f"#{name} (Slack)"
+                if uf and os.path.exists(uf["path"]):
+                    await asyncio.to_thread(
+                        client.files_upload_v2,
+                        channel=raw_id, file=uf["path"],
+                        initial_comment=req.message or "",
+                    )
+                else:
+                    await asyncio.to_thread(
+                        client.chat_postMessage,
+                        channel=raw_id, text=req.message,
+                    )
+
+            status["sent"] += 1
+            sent_times.append(time.time())
+            status["log"].append(f"OK: {status['current_chat']}")
+
+        except SlackApiError as e:
+            err = e.response.get("error", str(e))
+            if err == "ratelimited":
+                retry_after = int(e.response.headers.get("Retry-After", 5))
+                status["log"].append(f"Rate limited by Slack — retrying in {retry_after}s")
+                await asyncio.sleep(retry_after)
+                try:
+                    await asyncio.to_thread(client.chat_postMessage, channel=raw_id, text=req.message)
+                    status["sent"] += 1
+                    status["log"].append(f"OK (retry): #{raw_id} (Slack)")
+                except Exception as e2:
+                    status["failed"] += 1
+                    status["log"].append(f"FAIL [{chat_id}]: {e2}")
+            else:
+                status["failed"] += 1
+                status["log"].append(f"FAIL [{chat_id}]: {err}")
+        except Exception as e:
+            status["failed"] += 1
+            status["log"].append(f"FAIL [{chat_id}]: {e}")
+
+        if i < len(ordered_ids) - 1 and status["running"]:
+            delay = req.delay + (random.uniform(0, 3) if req.random_delay else 0)
+            await asyncio.sleep(delay)
+
+    # Determine channel_type
+    platforms_used = set(info["platform"] for info in chat_map.values())
+    if len(platforms_used) > 1:
+        ch_type = "mixed"
+    else:
+        ch_type = platforms_used.pop() if platforms_used else "unknown"
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        """INSERT INTO broadcast_history
+           (message, total, sent, failed, started_at, finished_at,
+            tg_session_token, app_user_id, app_username, log, channel_type)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            (req.message or "")[:200], status["total"], status["sent"], status["failed"],
+            started_at, datetime.utcnow().isoformat(),
+            broadcast_id, int(app_user["sub"]), app_user["username"],
+            json.dumps(status["log"]), ch_type
+        )
+    )
+    conn.commit()
+    conn.close()
+
+    status["running"] = False
+    status["finished"] = True
+    status["current_chat"] = ""
+    status["log"].append(f"Done. Sent: {status['sent']}, Failed: {status['failed']}")
+
+# ── Unified lists ────────────────────────────────────────────────────────────
+
+class UnifiedSaveListRequest(BaseModel):
+    name: str
+    chat_ids: list[str]   # ["tg:123", "slack:C01ABC"]
+
+@app.get("/api/unified/lists")
+def get_unified_lists(app_user: dict = Depends(get_current_app_user)):
+    conn = sqlite3.connect(DB_PATH)
+    if app_user["role"] == "admin":
+        rows = conn.execute(
+            "SELECT id, name, chats, created_at, channel_type FROM chat_lists ORDER BY id DESC"
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT id, name, chats, created_at, channel_type FROM chat_lists WHERE owner_app_user_id=? ORDER BY id DESC",
+            (int(app_user["sub"]),)
+        ).fetchall()
+    conn.close()
+    return {"lists": [
+        {"id": r[0], "name": r[1], "chats": json.loads(r[2]), "created_at": r[3], "channel_type": r[4] or "telegram"}
+        for r in rows
+    ]}
+
+@app.post("/api/unified/lists")
+def save_unified_list(req: UnifiedSaveListRequest, app_user: dict = Depends(get_current_app_user)):
+    # Determine channel_type from chat IDs
+    platforms = set()
+    for cid in req.chat_ids:
+        if cid.startswith("tg:"):
+            platforms.add("telegram")
+        elif cid.startswith("slack:"):
+            platforms.add("slack")
+    ch_type = "mixed" if len(platforms) > 1 else (platforms.pop() if platforms else "unknown")
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT INTO chat_lists (name, chats, created_at, owner_app_user_id, channel_type) VALUES (?,?,?,?,?)",
+        (req.name, json.dumps(req.chat_ids), datetime.utcnow().isoformat(),
+         int(app_user["sub"]), ch_type)
+    )
+    conn.commit()
+    conn.close()
+    return {"saved": True}
+
+@app.delete("/api/unified/lists/{list_id}")
+def delete_unified_list(list_id: int, app_user: dict = Depends(get_current_app_user)):
+    conn = sqlite3.connect(DB_PATH)
+    if app_user["role"] == "admin":
+        conn.execute("DELETE FROM chat_lists WHERE id=?", (list_id,))
+    else:
+        conn.execute("DELETE FROM chat_lists WHERE id=? AND owner_app_user_id=?",
                      (list_id, int(app_user["sub"])))
     conn.commit()
     conn.close()
