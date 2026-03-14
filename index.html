@@ -200,6 +200,20 @@
   .selected-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
   .search-row { margin-bottom: 10px; }
   .current-tag { font-size: 11px; color: var(--accent); padding: 3px 8px; border: 1px solid var(--accent2); border-radius: 4px; }
+
+  /* Platform switcher */
+  .platform-switch { display: flex; gap: 2px; padding: 3px; background: var(--bg); border-radius: var(--radius); border: 1px solid var(--border); }
+  .platform-btn {
+    padding: 5px 14px; border-radius: 4px; cursor: pointer; border: none;
+    background: transparent; color: var(--muted); font-family: inherit; font-size: 11px;
+    font-weight: 500; letter-spacing: 0.5px; transition: all .2s;
+  }
+  .platform-btn:hover { color: var(--text); }
+  .platform-btn.active-tg { background: #2aabee22; color: #2aabee; }
+  .platform-btn.active-slack { background: #4a154b22; color: #e01e5a; }
+  .slack-accent { color: #e01e5a; }
+  .badge-slack { background: rgba(224,30,90,0.12); color: #e01e5a; }
+  .badge-tg { background: rgba(42,171,238,0.12); color: #2aabee; }
 </style>
 </head>
 <body>
@@ -225,6 +239,21 @@ const api = {
   post: (path, body) => fetch(API_BASE + path, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }).then(r => { if(!r.ok) return r.json().then(e => { throw new Error(e.detail || r.status); }); return r.json(); }),
   del: (path) => fetch(API_BASE + path, { method:'DELETE' }).then(r => r.json()),
 };
+
+// ── Slack API helper — includes X-Slack-Session-Token header ────────────────
+let SLACK_SESSION_TOKEN = sessionStorage.getItem('slack_session_token') || '';
+
+const slackApi = {
+  get: (path) => fetch(API_BASE + path, { headers: { 'X-Slack-Session-Token': SLACK_SESSION_TOKEN } }).then(r => { if(!r.ok) throw new Error(r.status); return r.json(); }),
+  post: (path, body) => fetch(API_BASE + path, { method:'POST', headers:{'Content-Type':'application/json', 'X-Slack-Session-Token': SLACK_SESSION_TOKEN}, body: JSON.stringify(body) }).then(r => { if(!r.ok) return r.json().then(e => { throw new Error(e.detail || r.status); }); return r.json(); }),
+  del: (path) => fetch(API_BASE + path, { method:'DELETE', headers: { 'X-Slack-Session-Token': SLACK_SESSION_TOKEN } }).then(r => r.json()),
+};
+
+function setSlackToken(token) {
+  SLACK_SESSION_TOKEN = token;
+  if (token) sessionStorage.setItem('slack_session_token', token);
+  else sessionStorage.removeItem('slack_session_token');
+}
 
 // ── Settings Screen — ввод URL бэкенда ──────────────────────────────────────
 function SettingsScreen({ onSave }) {
@@ -698,6 +727,7 @@ function HistoryPage() {
             <table>
               <thead>
                 <tr>
+                  <th>Channel</th>
                   <th>Message</th>
                   <th>Sent</th>
                   <th>Failed</th>
@@ -708,6 +738,7 @@ function HistoryPage() {
               <tbody>
                 {history.map(h => (
                   <tr key={h.id}>
+                    <td><span className={`badge ${h.channel_type==='slack'?'badge-slack':'badge-tg'}`}>{h.channel_type==='slack'?'Slack':'TG'}</span></td>
                     <td style={{maxWidth:240,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{h.message}</td>
                     <td><span className="badge badge-green">{h.sent}</span></td>
                     <td><span className={`badge ${h.failed>0?'badge-red':'badge-green'}`}>{h.failed}</span></td>
@@ -724,6 +755,323 @@ function HistoryPage() {
   );
 }
 
+// ── Slack Login Page ────────────────────────────────────────────────────────
+function SlackLoginPage({ onAuth }) {
+  const [botToken, setBotToken] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const [autoChecked, setAutoChecked] = useState(false);
+
+  useEffect(() => {
+    if (SLACK_SESSION_TOKEN && !autoChecked) {
+      setAutoChecked(true);
+      setLoading(true);
+      slackApi.get('/api/slack/me')
+        .then(me => onAuth(me))
+        .catch(() => { setSlackToken(''); })
+        .finally(() => setLoading(false));
+    } else { setAutoChecked(true); }
+  }, []);
+
+  const doConnect = async () => {
+    setLoading(true); setErr('');
+    try {
+      const r = await slackApi.post('/api/slack/connect', { bot_token: botToken });
+      setSlackToken(r.slack_session_token);
+      onAuth({ team: r.team_name, bot_user_id: r.bot_user_id });
+    } catch(e) { setErr('Connection failed: ' + e.message); }
+    setLoading(false);
+  };
+
+  if (loading) return (
+    React.createElement('div', {style:{display:'flex',alignItems:'center',justifyContent:'center',height:'60vh',gap:12}},
+      React.createElement('span', {className:'spinner'}),
+      React.createElement('span', {style:{color:'var(--muted)'}}, 'Connecting to Slack...')
+    )
+  );
+
+  return (
+    React.createElement('div', {className:'login-wrap'},
+      React.createElement('div', {className:'login-hero'},
+        React.createElement('h1', {style:{color:'#e01e5a'}}, 'Slack Broadcast'),
+        React.createElement('p', null, 'Connect your Slack Bot to start broadcasting')
+      ),
+      React.createElement('div', {className:'card'},
+        React.createElement('div', {className:'card-title', style:{color:'#e01e5a'}}, 'Bot Token'),
+        React.createElement('p', {style:{fontSize:'12px',color:'var(--muted)',marginBottom:12}},
+          'Create a Slack App at ',
+          React.createElement('a', {href:'https://api.slack.com/apps', target:'_blank', style:{color:'#e01e5a'}}, 'api.slack.com/apps'),
+          ' and copy your Bot User OAuth Token (xoxb-...).',
+          React.createElement('br', null),
+          'Required scopes: channels:read, groups:read, chat:write, files:write'
+        ),
+        React.createElement('label', null, 'Bot Token'),
+        React.createElement('input', {type:'text', placeholder:'xoxb-...', value:botToken, onChange:e=>setBotToken(e.target.value)}),
+        err && React.createElement('div', {className:'alert alert-err'}, err),
+        React.createElement('div', {style:{marginTop:16}},
+          React.createElement('button', {className:'btn btn-primary', onClick:doConnect, disabled:loading||!botToken, style:{background:'#e01e5a'}},
+            loading ? React.createElement(React.Fragment, null, React.createElement('span', {className:'spinner'}), ' Connecting...') : 'Connect to Slack'
+          )
+        )
+      )
+    )
+  );
+}
+
+// ── Slack Chats Page ────────────────────────────────────────────────────────
+function SlackChatsPage({ selected, setSelected }) {
+  const [channels, setChannels] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState('');
+  const [lists, setLists] = useState([]);
+  const [saveListName, setSaveListName] = useState('');
+  const [err, setErr] = useState('');
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => { loadLists(); }, []);
+
+  const loadChannels = async () => {
+    setLoading(true); setErr('');
+    try { const r = await slackApi.get('/api/slack/channels'); setChannels(r.channels); }
+    catch(e) { setErr('Failed to load channels: ' + e.message); }
+    setLoading(false);
+  };
+
+  const loadLists = async () => {
+    try { const r = await slackApi.get('/api/slack/lists'); setLists(r.lists || []); } catch(e) {}
+  };
+
+  const toggle = (id) => {
+    setSelected(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]);
+  };
+
+  const filtered = channels.filter(c => c.name.toLowerCase().includes(search.toLowerCase()));
+  const selectAll = () => setSelected(filtered.map(c=>c.id));
+  const clearAll = () => setSelected([]);
+
+  const doSaveList = async () => {
+    if (!saveListName || !selected.length) return;
+    await slackApi.post('/api/slack/lists', { name: saveListName, channel_ids: selected });
+    setSaveListName(''); setMsg('List saved!'); loadLists();
+    setTimeout(() => setMsg(''), 2500);
+  };
+
+  const loadSavedList = (lst) => { setSelected(lst.channels); };
+  const deleteList = async (id) => { await slackApi.del('/api/slack/lists/' + id); loadLists(); };
+
+  return (
+    React.createElement('div', {className:'main'},
+      React.createElement('div', {className:'page'},
+        React.createElement('div', {className:'card'},
+          React.createElement('div', {className:'card-title', style:{color:'#e01e5a'}}, 'Slack Channels'),
+          React.createElement('div', {style:{display:'flex',gap:10}},
+            React.createElement('button', {className:'btn btn-primary', onClick:loadChannels, disabled:loading, style:{background:'#e01e5a'}},
+              loading ? React.createElement(React.Fragment, null, React.createElement('span', {className:'spinner'}), ' Loading...') : 'Load Channels'
+            ),
+            channels.length > 0 && React.createElement('span', {style:{color:'var(--muted)',alignSelf:'center',fontSize:12}}, channels.length + ' channels found')
+          ),
+          err && React.createElement('div', {className:'alert alert-err', style:{marginTop:10}}, err)
+        ),
+        channels.length > 0 && React.createElement('div', {className:'card'},
+          React.createElement('div', {className:'selected-bar'},
+            React.createElement('div', {className:'card-title', style:{marginBottom:0, color:'#e01e5a'}},
+              'Select Channels ',
+              React.createElement('span', {className:'badge badge-slack', style:{marginLeft:8}}, selected.length + ' selected')
+            ),
+            React.createElement('div', {style:{display:'flex',gap:8}},
+              React.createElement('button', {className:'btn btn-secondary btn-sm', onClick:selectAll}, 'Select All'),
+              React.createElement('button', {className:'btn btn-secondary btn-sm', onClick:clearAll}, 'Clear')
+            )
+          ),
+          React.createElement('div', {className:'search-row'},
+            React.createElement('input', {type:'text', placeholder:'Search channels...', value:search, onChange:e=>setSearch(e.target.value)})
+          ),
+          React.createElement('div', {className:'chat-list'},
+            filtered.map(c =>
+              React.createElement('div', {key:c.id, className:'chat-item ' + (selected.includes(c.id)?'selected':''), onClick:()=>toggle(c.id)},
+                React.createElement('div', {className:'chat-avatar', style:{background:'rgba(224,30,90,0.15)', color:'#e01e5a'}}, '#'),
+                React.createElement('div', {className:'chat-info'},
+                  React.createElement('div', {className:'chat-name'}, '#' + c.name),
+                  React.createElement('div', {className:'chat-meta'},
+                    React.createElement('span', {className:'badge badge-slack'}, c.type === 'private_channel' ? 'private' : 'public'),
+                    c.num_members > 0 && React.createElement('span', {style:{marginLeft:6}}, c.num_members + ' members'),
+                    !c.is_member && React.createElement('span', {style:{marginLeft:6, color:'var(--yellow)', fontSize:10}}, 'not joined')
+                  )
+                ),
+                React.createElement('div', {className:'chat-check'},
+                  selected.includes(c.id) && React.createElement('span', {style:{color:'var(--bg)',fontSize:12}}, '\u2713')
+                )
+              )
+            )
+          ),
+          selected.length > 0 && React.createElement('div', {style:{marginTop:14}},
+            React.createElement('div', {className:'sep'}),
+            React.createElement('label', null, 'Save selection as list'),
+            React.createElement('div', {className:'row-gap'},
+              React.createElement('input', {type:'text', placeholder:'List name', value:saveListName, onChange:e=>setSaveListName(e.target.value), style:{flex:1}}),
+              React.createElement('button', {className:'btn btn-secondary btn-sm', onClick:doSaveList, disabled:!saveListName}, 'Save')
+            ),
+            msg && React.createElement('div', {className:'alert alert-ok', style:{marginTop:8}}, msg)
+          )
+        )
+      ),
+      React.createElement('div', {className:'sidebar'},
+        React.createElement('div', {className:'sidebar-title'}, 'Saved Lists'),
+        lists.length === 0 && React.createElement('p', {style:{color:'var(--muted)',fontSize:12}}, 'No saved lists yet'),
+        lists.map(lst =>
+          React.createElement('div', {key:lst.id, style:{marginBottom:10,padding:'10px',background:'var(--bg)',borderRadius:'var(--radius)',border:'1px solid var(--border)'}},
+            React.createElement('div', {style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
+              React.createElement('span', {style:{fontSize:13}}, lst.name),
+              React.createElement('button', {className:'btn btn-secondary btn-sm', style:{padding:'3px 8px',fontSize:10}, onClick:()=>deleteList(lst.id)}, '\u2715')
+            ),
+            React.createElement('div', {style:{fontSize:11,color:'var(--muted)',marginTop:4}}, lst.channels.length + ' channels'),
+            React.createElement('button', {className:'btn btn-secondary btn-sm', style:{marginTop:8,width:'100%'}, onClick:()=>loadSavedList(lst)}, 'Load')
+          )
+        )
+      )
+    )
+  );
+}
+
+// ── Slack Broadcast Page ────────────────────────────────────────────────────
+function SlackBroadcastPage({ selected }) {
+  const [message, setMessage] = useState('');
+  const [delay, setDelay] = useState(1);
+  const [randomDelay, setRandomDelay] = useState(false);
+  const [maxPerMin, setMaxPerMin] = useState(30);
+  const [status, setStatus] = useState(null);
+  const [polling, setPolling] = useState(false);
+  const [templates, setTemplates] = useState([]);
+  const [tplName, setTplName] = useState('');
+  const [tplMsg, setTplMsg] = useState('');
+  const [tplTab, setTplTab] = useState(false);
+  const logRef = useRef(null);
+  const pollRef = useRef(null);
+
+  useEffect(() => { loadTemplates(); }, []);
+  useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [status]);
+
+  const loadTemplates = async () => {
+    try { const r = await api.get('/api/templates'); setTemplates(r.templates || []); } catch(e) {}
+  };
+
+  const startPoll = () => {
+    setPolling(true);
+    pollRef.current = setInterval(async () => {
+      try {
+        const s = await slackApi.get('/api/slack/broadcast/status');
+        setStatus(s);
+        if (!s.running && s.finished) { clearInterval(pollRef.current); setPolling(false); }
+      } catch(e) {}
+    }, 800);
+  };
+
+  const doStart = async () => {
+    if (!selected.length || !message.trim()) return;
+    await slackApi.post('/api/slack/broadcast/start', {
+      channel_ids: selected, message, delay, random_delay: randomDelay, max_per_minute: maxPerMin
+    });
+    startPoll();
+  };
+
+  const doStop = async () => { await slackApi.post('/api/slack/broadcast/stop', {}); };
+
+  const doSaveTpl = async () => {
+    if (!tplName || !tplMsg) return;
+    await api.post('/api/templates', { name: tplName, text: tplMsg });
+    setTplName(''); setTplMsg(''); loadTemplates();
+  };
+
+  const progress = status ? Math.round((status.sent + status.failed) / (status.total || 1) * 100) : 0;
+
+  return React.createElement('div', {className:'main'},
+    React.createElement('div', {className:'page'},
+      selected.length === 0 && React.createElement('div', {className:'alert alert-info', style:{marginBottom:16}},
+        'Select channels in the Channels tab first'
+      ),
+      React.createElement('div', {className:'card'},
+        React.createElement('div', {className:'card-title', style:{color:'#e01e5a'}}, 'Compose Message'),
+        React.createElement('div', {style:{display:'flex',gap:8,marginBottom:10}},
+          React.createElement('button', {className:'btn btn-secondary btn-sm', onClick:()=>setTplTab(false), style:!tplTab?{borderColor:'#e01e5a',color:'#e01e5a'}:{}}, 'Compose'),
+          React.createElement('button', {className:'btn btn-secondary btn-sm', onClick:()=>setTplTab(true), style:tplTab?{borderColor:'#e01e5a',color:'#e01e5a'}:{}}, 'Templates')
+        ),
+        !tplTab ? React.createElement(React.Fragment, null,
+          React.createElement('textarea', {placeholder:'Type your broadcast message here...', value:message, onChange:e=>setMessage(e.target.value), style:{minHeight:130}}),
+          React.createElement('div', {style:{fontSize:11,color:'var(--muted)',marginTop:4,textAlign:'right'}}, message.length + ' chars \u00b7 ' + selected.length + ' channels selected')
+        ) : React.createElement('div', null,
+          React.createElement('div', {style:{marginBottom:10}},
+            templates.length === 0 && React.createElement('p', {style:{color:'var(--muted)',fontSize:12}}, 'No templates saved yet'),
+            templates.map(t =>
+              React.createElement('div', {key:t.id, style:{display:'flex',alignItems:'center',gap:8,marginBottom:8,padding:'8px 10px',background:'var(--bg)',borderRadius:'var(--radius)',border:'1px solid var(--border)'}},
+                React.createElement('div', {style:{flex:1}},
+                  React.createElement('div', {style:{fontSize:12,color:'var(--text)'}}, t.name),
+                  React.createElement('div', {style:{fontSize:11,color:'var(--muted)',marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:300}}, t.text)
+                ),
+                React.createElement('button', {className:'btn btn-secondary btn-sm', onClick:()=>{setMessage(t.text);setTplTab(false);}}, 'Use'),
+                React.createElement('button', {className:'btn btn-sm', style:{background:'transparent',color:'var(--muted)',border:'none',padding:'4px 6px'}, onClick:()=>api.del('/api/templates/'+t.id).then(loadTemplates)}, '\u2715')
+              )
+            )
+          ),
+          React.createElement('div', {className:'sep'}),
+          React.createElement('label', null, 'New Template Name'),
+          React.createElement('input', {type:'text', placeholder:'Template name', value:tplName, onChange:e=>setTplName(e.target.value)}),
+          React.createElement('label', null, 'Message Text'),
+          React.createElement('textarea', {placeholder:'Template message...', value:tplMsg, onChange:e=>setTplMsg(e.target.value), style:{minHeight:80}}),
+          React.createElement('div', {style:{marginTop:10}},
+            React.createElement('button', {className:'btn btn-secondary btn-sm', onClick:doSaveTpl, disabled:!tplName||!tplMsg}, 'Save Template')
+          )
+        )
+      ),
+      React.createElement('div', {className:'card'},
+        React.createElement('div', {className:'card-title', style:{color:'#e01e5a'}}, 'Broadcast Settings'),
+        React.createElement('div', {className:'two-col'},
+          React.createElement('div', null,
+            React.createElement('label', null, 'Delay (seconds)'),
+            React.createElement('input', {type:'number', min:'1', max:'60', value:delay, onChange:e=>setDelay(Number(e.target.value))})
+          ),
+          React.createElement('div', null,
+            React.createElement('label', null, 'Max per minute'),
+            React.createElement('input', {type:'number', min:'1', max:'60', value:maxPerMin, onChange:e=>setMaxPerMin(Number(e.target.value))})
+          )
+        ),
+        React.createElement('div', {className:'toggle-row'},
+          React.createElement('span', {className:'toggle-label'}, 'Random delay (+0\u20133s)'),
+          React.createElement('label', {className:'toggle'},
+            React.createElement('input', {type:'checkbox', checked:randomDelay, onChange:e=>setRandomDelay(e.target.checked)}),
+            React.createElement('span', {className:'toggle-slider'})
+          )
+        )
+      ),
+      React.createElement('div', {style:{display:'flex',gap:10}},
+        React.createElement('button', {className:'btn btn-primary', style:{flex:1,justifyContent:'center',background:'#e01e5a'}, onClick:doStart, disabled:polling||!selected.length||!message.trim()},
+          polling ? React.createElement(React.Fragment, null, React.createElement('span', {className:'spinner'}), ' Broadcasting...') : 'Start Broadcast (' + selected.length + ' channels)'
+        ),
+        polling && React.createElement('button', {className:'btn btn-danger', onClick:doStop}, 'Stop')
+      ),
+      status && React.createElement('div', {className:'card', style:{marginTop:16}},
+        React.createElement('div', {className:'card-title', style:{color:'#e01e5a'}}, 'Progress'),
+        status.current_chat && React.createElement('div', {style:{marginBottom:10,display:'flex',alignItems:'center',gap:8}},
+          React.createElement('span', {className:'spinner'}),
+          React.createElement('span', {className:'current-tag'}, 'Sending to: #' + status.current_chat)
+        ),
+        React.createElement('div', {className:'progress-bar'},
+          React.createElement('div', {className:'progress-fill', style:{width:progress+'%', background:'#e01e5a'}})
+        ),
+        React.createElement('div', {style:{textAlign:'right',fontSize:11,color:'var(--muted)',marginBottom:12}}, progress + '% (' + (status.sent+status.failed) + '/' + status.total + ')'),
+        React.createElement('div', {className:'stats-row'},
+          React.createElement('div', {className:'stat'}, React.createElement('div', {className:'stat-val val-blue'}, status.total), React.createElement('div', {className:'stat-key'}, 'Total')),
+          React.createElement('div', {className:'stat'}, React.createElement('div', {className:'stat-val val-green'}, status.sent), React.createElement('div', {className:'stat-key'}, 'Sent')),
+          React.createElement('div', {className:'stat'}, React.createElement('div', {className:'stat-val val-red'}, status.failed), React.createElement('div', {className:'stat-key'}, 'Failed'))
+        ),
+        React.createElement('div', {className:'log-box', ref:logRef},
+          (status.log || []).map((l,i) => React.createElement('div', {key:i, className:'log-line'}, l)),
+          !status.running && status.finished && React.createElement('div', {className:'log-line', style:{color:'var(--green)',marginTop:8}}, '\u2501\u2501 BROADCAST COMPLETE \u2501\u2501')
+        )
+      )
+    )
+  );
+}
+
 // ── App ──────────────────────────────────────────────────────────────────────
 function App() {
   const [user, setUser] = useState(null);
@@ -731,6 +1079,11 @@ function App() {
   const [selected, setSelected] = useState([]);
   const [checkingAuth, setCheckingAuth] = useState(false);
   const [showSettings, setShowSettings] = useState(!sessionStorage.getItem('api_base'));
+
+  // Platform & Slack state
+  const [platform, setPlatform] = useState('telegram');
+  const [slackUser, setSlackUser] = useState(null);
+  const [slackSelected, setSlackSelected] = useState([]);
 
   const tryAutoLogin = useCallback(() => {
     setCheckingAuth(true);
@@ -755,6 +1108,17 @@ function App() {
     setUser(null); setSelected([]);
   };
 
+  const doSlackLogout = async () => {
+    try { await slackApi.post('/api/slack/disconnect', {}); } catch(e) {}
+    setSlackToken('');
+    setSlackUser(null); setSlackSelected([]);
+  };
+
+  const switchPlatform = (p) => {
+    setPlatform(p);
+    setTab('chats');
+  };
+
   if (showSettings) return <SettingsScreen onSave={handleSettingsSave} />;
 
   if (checkingAuth) return (
@@ -763,35 +1127,83 @@ function App() {
     </div>
   );
 
-  if (!user) return <LoginPage onAuth={setUser} />;
+  // Telegram not logged in and platform is telegram
+  if (!user && platform === 'telegram') return (
+    <>
+      <div style={{position:'fixed',top:16,right:16,zIndex:200}}>
+        <div className="platform-switch">
+          <button className={'platform-btn active-tg'} onClick={()=>switchPlatform('telegram')}>Telegram</button>
+          <button className={'platform-btn'} onClick={()=>switchPlatform('slack')}>Slack</button>
+        </div>
+      </div>
+      <LoginPage onAuth={setUser} />
+    </>
+  );
+
+  // Slack not logged in and platform is slack
+  if (!slackUser && platform === 'slack') return (
+    <>
+      <div style={{position:'fixed',top:16,right:16,zIndex:200}}>
+        <div className="platform-switch">
+          <button className={'platform-btn'} onClick={()=>switchPlatform('telegram')}>Telegram</button>
+          <button className={'platform-btn active-slack'} onClick={()=>switchPlatform('slack')}>Slack</button>
+        </div>
+      </div>
+      <SlackLoginPage onAuth={setSlackUser} />
+    </>
+  );
+
+  const isTg = platform === 'telegram';
+  const curSelected = isTg ? selected : slackSelected;
+  const accentColor = isTg ? 'var(--accent)' : '#e01e5a';
 
   return (
     <>
       <div className="header">
         <div className="header-logo">
-          <div className="logo-icon">📡</div>
+          <div className="logo-icon" style={!isTg?{background:'#e01e5a'}:{}}>{isTg ? '📡' : '💬'}</div>
           <div>
-            <div className="logo-text">TG Broadcast</div>
-            <div className="logo-sub">Telethon User Client</div>
+            <div className="logo-text" style={{color:accentColor}}>{isTg ? 'TG Broadcast' : 'Slack Broadcast'}</div>
+            <div className="logo-sub">{isTg ? 'Telethon User Client' : (slackUser?.team || 'Slack Bot')}</div>
           </div>
         </div>
         <div className="header-user">
-          <div className="status-dot"/>
-          <span>{user.name || user.username}</span>
+          <div className="platform-switch" style={{marginRight:12}}>
+            <button className={'platform-btn' + (isTg?' active-tg':'')} onClick={()=>switchPlatform('telegram')}>Telegram</button>
+            <button className={'platform-btn' + (!isTg?' active-slack':'')} onClick={()=>switchPlatform('slack')}>Slack</button>
+          </div>
+          <div className="status-dot" style={!isTg?{background:'#e01e5a',boxShadow:'0 0 6px #e01e5a'}:{}}/>
+          <span>{isTg ? (user?.name || user?.username || '') : (slackUser?.team || slackUser?.user || 'Slack')}</span>
           <span style={{color:'var(--border)'}}>·</span>
           <button className="btn btn-secondary btn-sm" onClick={()=>setShowSettings(true)} style={{marginRight:4}}>⚙️</button>
-          <button className="btn btn-secondary btn-sm" onClick={doLogout}>Выйти</button>
+          <button className="btn btn-secondary btn-sm" onClick={isTg ? doLogout : doSlackLogout}>Выйти</button>
         </div>
       </div>
       <div className="nav">
-        {[['chats','📂 Чаты'], ['broadcast','🚀 Рассылка'+(selected.length?` (${selected.length})`:'')], ['history','📜 История']].map(([k,l]) => (
-          <button key={k} className={`nav-btn ${tab===k?'active':''}`} onClick={()=>setTab(k)}>{l}</button>
-        ))}
+        {isTg ? (
+          [['chats','📂 Чаты'], ['broadcast','🚀 Рассылка'+(selected.length?` (${selected.length})`:'')], ['history','📜 История']].map(([k,l]) => (
+            <button key={k} className={`nav-btn ${tab===k?'active':''}`} onClick={()=>setTab(k)}>{l}</button>
+          ))
+        ) : (
+          [['chats','💬 Каналы'], ['broadcast','🚀 Рассылка'+(slackSelected.length?` (${slackSelected.length})`:'')], ['history','📜 История']].map(([k,l]) => (
+            <button key={k} className={`nav-btn ${tab===k?'active':''}`} onClick={()=>setTab(k)} style={tab===k?{color:'#e01e5a',borderBottomColor:'#e01e5a'}:{}}>{l}</button>
+          ))
+        )}
       </div>
       <div style={{flex:1,overflow:'auto'}}>
-        {tab === 'chats' && <ChatsPage selected={selected} setSelected={setSelected} />}
-        {tab === 'broadcast' && <BroadcastPage selected={selected} />}
-        {tab === 'history' && <HistoryPage />}
+        {isTg ? (
+          <>
+            {tab === 'chats' && <ChatsPage selected={selected} setSelected={setSelected} />}
+            {tab === 'broadcast' && <BroadcastPage selected={selected} />}
+            {tab === 'history' && <HistoryPage />}
+          </>
+        ) : (
+          <>
+            {tab === 'chats' && <SlackChatsPage selected={slackSelected} setSelected={setSlackSelected} />}
+            {tab === 'broadcast' && <SlackBroadcastPage selected={slackSelected} />}
+            {tab === 'history' && <HistoryPage />}
+          </>
+        )}
       </div>
     </>
   );
