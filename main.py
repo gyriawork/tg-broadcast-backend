@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from telethon import TelegramClient, errors
-from telethon.tl.types import Channel, Chat
+from telethon.tl.types import Channel, Chat, User as TgUser
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -470,6 +470,17 @@ async def get_chats(token: str = Depends(get_tg_session_token),
                     "name": dialog.name,
                     "type": "channel" if isinstance(entity, Channel) and entity.broadcast else "group",
                     "members": getattr(entity, "participants_count", None),
+                    "username": getattr(entity, "username", None),
+                })
+            elif isinstance(entity, TgUser) and not entity.bot and not entity.is_self:
+                first = entity.first_name or ""
+                last  = entity.last_name or ""
+                name  = (first + " " + last).strip() or entity.username or str(dialog.id)
+                chats.append({
+                    "id": dialog.id,
+                    "name": name,
+                    "type": "user",
+                    "members": None,
                     "username": getattr(entity, "username", None),
                 })
     except errors.AuthKeyUnregisteredError:
