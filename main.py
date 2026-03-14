@@ -21,6 +21,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from telethon import TelegramClient, errors
 from telethon.tl.types import Channel, Chat, User as TgUser
+from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -60,6 +62,10 @@ broadcast_statuses: dict[str, dict]         = {}
 phone_code_hashes:  dict[str, str]          = {}
 saved_phones:       dict[str, str]          = {}
 uploaded_files:     dict[str, dict]         = {}
+
+# ── Slack per-session state ──────────────────────────────────────────────────
+slack_clients:  dict[str, WebClient] = {}   # session_token -> WebClient
+slack_sessions: dict[str, dict]      = {}   # session_token -> {team_name, bot_user_id, ...}
 
 # ── DB ────────────────────────────────────────────────────────────────────────
 def init_db():
@@ -137,6 +143,25 @@ def init_db():
     if "log" not in cols:
         c.execute("ALTER TABLE broadcast_history ADD COLUMN log TEXT")
         logger.info("Migrated broadcast_history: added log")
+    if "channel_type" not in cols:
+        c.execute("ALTER TABLE broadcast_history ADD COLUMN channel_type TEXT DEFAULT 'telegram'")
+        logger.info("Migrated broadcast_history: added channel_type")
+    # ── migrate chat_lists: add channel_type ──
+    cl_cols = {row[1] for row in c.execute("PRAGMA table_info(chat_lists)")}
+    if "channel_type" not in cl_cols:
+        c.execute("ALTER TABLE chat_lists ADD COLUMN channel_type TEXT DEFAULT 'telegram'")
+        logger.info("Migrated chat_lists: added channel_type")
+    # ── slack connections ──
+    c.execute("""CREATE TABLE IF NOT EXISTS slack_connections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_token TEXT NOT NULL UNIQUE,
+        bot_token TEXT NOT NULL,
+        team_id TEXT,
+        team_name TEXT,
+        bot_user_id TEXT,
+        app_user_id INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+    )""")
     conn.commit()
     conn.close()
 
@@ -187,6 +212,28 @@ async def _cleanup_old_uploads():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    # Restore Slack sessions from DB (tokens are stateless, survive restarts)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute(
+            "SELECT session_token, bot_token, team_id, team_name, bot_user_id, app_user_id FROM slack_connections"
+        ).fetchall()
+        conn.close()
+        for row in rows:
+            s_token, bot_token, team_id, team_name, bot_user_id, app_user_id = row
+            try:
+                client = WebClient(token=bot_token)
+                client.auth_test()  # validate token still works
+                slack_clients[s_token] = client
+                slack_sessions[s_token] = {
+                    "team_id": team_id, "team_name": team_name,
+                    "bot_user_id": bot_user_id, "app_user_id": app_user_id,
+                }
+                logger.info(f"Restored Slack session: {team_name} ({s_token[:8]}...)")
+            except Exception as e:
+                logger.warning(f"Failed to restore Slack session {s_token[:8]}...: {e}")
+    except Exception as e:
+        logger.error(f"Failed to load Slack connections: {e}")
     asyncio.create_task(_cleanup_old_uploads())
     asyncio.create_task(_sqlite_backup_loop())
     yield
@@ -196,15 +243,18 @@ async def lifespan(app: FastAPI):
             status["running"] = False
             status["finished"] = True
             status["log"].append("Stopped: server shutdown")
+            # Determine channel_type based on whether it's a Slack session
+            ch_type = "slack" if token in slack_clients else "telegram"
             try:
                 conn = sqlite3.connect(DB_PATH)
                 conn.execute(
                     """INSERT INTO broadcast_history
-                       (message, total, sent, failed, started_at, finished_at, tg_session_token, log)
-                       VALUES (?,?,?,?,?,?,?,?)""",
+                       (message, total, sent, failed, started_at, finished_at,
+                        tg_session_token, log, channel_type)
+                       VALUES (?,?,?,?,?,?,?,?,?)""",
                     ("(shutdown)", status["total"], status["sent"], status["failed"],
                      datetime.utcnow().isoformat(), datetime.utcnow().isoformat(),
-                     token, json.dumps(status["log"]))
+                     token, json.dumps(status["log"]), ch_type)
                 )
                 conn.commit()
                 conn.close()
@@ -268,6 +318,18 @@ def get_broadcast_status(token: str) -> dict:
             "current_chat": "", "log": [], "finished": False,
         }
     return broadcast_statuses[token]
+
+# ── Slack session helpers ────────────────────────────────────────────────────
+def get_slack_session_token(x_slack_session_token: Optional[str] = Header(None)) -> str:
+    if not x_slack_session_token:
+        raise HTTPException(status_code=400, detail="Missing X-Slack-Session-Token header")
+    return x_slack_session_token
+
+def get_slack_client(token: str) -> WebClient:
+    c = slack_clients.get(token)
+    if not c:
+        raise HTTPException(status_code=400, detail="No Slack session. Connect first.")
+    return c
 
 # ═════════════════════════════════════════════════════════════════════════════
 # ── RBAC: App auth endpoints ──────────────────────────────────────────────────
@@ -712,19 +774,20 @@ def get_history(app_user: dict = Depends(get_current_app_user)):
     conn = sqlite3.connect(DB_PATH)
     if app_user["role"] == "admin":
         rows = conn.execute(
-            """SELECT id, message, total, sent, failed, started_at, finished_at, app_username, log
+            """SELECT id, message, total, sent, failed, started_at, finished_at, app_username, log, channel_type
                FROM broadcast_history ORDER BY id DESC LIMIT 100"""
         ).fetchall()
         result = [
             {"id": r[0], "message": r[1], "total": r[2], "sent": r[3],
              "failed": r[4], "started_at": r[5], "finished_at": r[6],
              "started_by": r[7] or "unknown",
-             "log": json.loads(r[8]) if r[8] else []}
+             "log": json.loads(r[8]) if r[8] else [],
+             "channel_type": r[9] or "telegram"}
             for r in rows
         ]
     else:
         rows = conn.execute(
-            """SELECT id, message, total, sent, failed, started_at, finished_at, log
+            """SELECT id, message, total, sent, failed, started_at, finished_at, log, channel_type
                FROM broadcast_history WHERE app_user_id=? ORDER BY id DESC LIMIT 50""",
             (int(app_user["sub"]),)
         ).fetchall()
@@ -732,19 +795,23 @@ def get_history(app_user: dict = Depends(get_current_app_user)):
             {"id": r[0], "message": r[1], "total": r[2], "sent": r[3],
              "failed": r[4], "started_at": r[5], "finished_at": r[6],
              "started_by": app_user["username"],
-             "log": json.loads(r[7]) if r[7] else []}
+             "log": json.loads(r[7]) if r[7] else [],
+             "channel_type": r[8] or "telegram"}
             for r in rows
         ]
     conn.close()
     return {"history": result}
 
-# ── Admin: list active TG sessions ───────────────────────────────────────────
+# ── Admin: list active sessions ──────────────────────────────────────────────
 @app.get("/api/admin/sessions")
 def admin_sessions(admin: dict = Depends(require_admin)):
     result = []
     for token, client in tg_clients.items():
         label = saved_phones.get(token, token[:8] + "...")
-        result.append({"token": token, "label": label})
+        result.append({"token": token, "label": label, "type": "telegram"})
+    for token, info in slack_sessions.items():
+        label = info.get("team_name", token[:8] + "...")
+        result.append({"token": token, "label": label, "type": "slack"})
     return {"sessions": result}
 
 # ── SSE: broadcast progress stream ───────────────────────────────────────────
@@ -812,9 +879,350 @@ async def manual_backup(admin: dict = Depends(require_admin)):
     size = os.path.getsize(dst)
     return {"backup": dst, "size_bytes": size, "created_at": ts}
 
+# ═════════════════════════════════════════════════════════════════════════════
+# ── Slack: endpoints ─────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+
+class SlackConnectRequest(BaseModel):
+    bot_token: str
+
+class SlackBroadcastRequest(BaseModel):
+    channel_ids: list[str]
+    message: Optional[str] = None
+    delay: float = 1.0
+    random_delay: bool = False
+    max_per_minute: int = 30
+    file_id: Optional[str] = None
+
+class SlackSaveListRequest(BaseModel):
+    name: str
+    channel_ids: list[str]
+
+# ── Slack: connect / me / disconnect ─────────────────────────────────────────
+
+@app.post("/api/slack/connect")
+async def slack_connect(req: SlackConnectRequest,
+                        app_user: dict = Depends(get_current_app_user)):
+    try:
+        client = WebClient(token=req.bot_token)
+        resp = await asyncio.to_thread(client.auth_test)
+    except SlackApiError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid Slack token: {e.response['error']}")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Slack connection failed: {e}")
+
+    session_token = secrets.token_hex(16)
+    team_id = resp.get("team_id", "")
+    team_name = resp.get("team", "")
+    bot_user_id = resp.get("user_id", "")
+
+    slack_clients[session_token] = client
+    slack_sessions[session_token] = {
+        "team_id": team_id,
+        "team_name": team_name,
+        "bot_user_id": bot_user_id,
+        "app_user_id": int(app_user["sub"]),
+    }
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        """INSERT INTO slack_connections
+           (session_token, bot_token, team_id, team_name, bot_user_id, app_user_id, created_at)
+           VALUES (?,?,?,?,?,?,?)""",
+        (session_token, req.bot_token, team_id, team_name, bot_user_id,
+         int(app_user["sub"]), datetime.utcnow().isoformat())
+    )
+    conn.commit()
+    conn.close()
+
+    return {
+        "connected": True,
+        "slack_session_token": session_token,
+        "team_name": team_name,
+        "bot_user_id": bot_user_id,
+    }
+
+@app.get("/api/slack/me")
+async def slack_me(token: str = Depends(get_slack_session_token),
+                   _: dict = Depends(get_current_app_user)):
+    client = get_slack_client(token)
+    try:
+        resp = await asyncio.to_thread(client.auth_test)
+    except SlackApiError as e:
+        raise HTTPException(status_code=400, detail=f"Slack error: {e.response['error']}")
+    return {
+        "team": resp.get("team", ""),
+        "team_id": resp.get("team_id", ""),
+        "user": resp.get("user", ""),
+        "user_id": resp.get("user_id", ""),
+        "url": resp.get("url", ""),
+    }
+
+@app.post("/api/slack/disconnect")
+async def slack_disconnect(token: str = Depends(get_slack_session_token),
+                           _: dict = Depends(get_current_app_user)):
+    slack_clients.pop(token, None)
+    slack_sessions.pop(token, None)
+    broadcast_statuses.pop(token, None)
+    uploaded_files.pop(token, None)
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM slack_connections WHERE session_token=?", (token,))
+    conn.commit()
+    conn.close()
+    return {"disconnected": True}
+
+# ── Slack: channels ──────────────────────────────────────────────────────────
+
+@app.get("/api/slack/channels")
+async def slack_channels(token: str = Depends(get_slack_session_token),
+                         _: dict = Depends(get_current_app_user)):
+    client = get_slack_client(token)
+    channels = []
+    cursor = None
+    try:
+        while True:
+            kwargs = {"types": "public_channel,private_channel", "limit": 200}
+            if cursor:
+                kwargs["cursor"] = cursor
+            resp = await asyncio.to_thread(
+                lambda: client.conversations_list(**kwargs)
+            )
+            for ch in resp.get("channels", []):
+                channels.append({
+                    "id": ch["id"],
+                    "name": ch.get("name", ""),
+                    "type": "private_channel" if ch.get("is_private") else "public_channel",
+                    "is_member": ch.get("is_member", False),
+                    "num_members": ch.get("num_members", 0),
+                    "topic": ch.get("topic", {}).get("value", ""),
+                })
+            cursor = resp.get("response_metadata", {}).get("next_cursor", "")
+            if not cursor:
+                break
+    except SlackApiError as e:
+        raise HTTPException(status_code=400, detail=f"Slack error: {e.response['error']}")
+    return {"channels": channels}
+
+# ── Slack: broadcast ─────────────────────────────────────────────────────────
+
+@app.post("/api/slack/broadcast/start")
+async def slack_start_broadcast(req: SlackBroadcastRequest,
+                                token: str = Depends(get_slack_session_token),
+                                app_user: dict = Depends(get_current_app_user)):
+    _ = get_slack_client(token)  # ensure connected
+    status = get_broadcast_status(token)
+    if status["running"]:
+        raise HTTPException(status_code=409, detail="Broadcast already running")
+
+    broadcast_statuses[token] = {
+        "running": True, "total": len(req.channel_ids), "sent": 0, "failed": 0,
+        "current_chat": "", "log": [], "finished": False,
+    }
+    asyncio.create_task(_run_slack_broadcast(req, token, app_user))
+    return {"started": True}
+
+@app.post("/api/slack/broadcast/stop")
+async def slack_stop_broadcast(token: str = Depends(get_slack_session_token),
+                               _: dict = Depends(get_current_app_user)):
+    if token in broadcast_statuses:
+        broadcast_statuses[token]["running"] = False
+    return {"stopped": True}
+
+@app.get("/api/slack/broadcast/status")
+async def slack_broadcast_status(token: str = Depends(get_slack_session_token),
+                                 _: dict = Depends(get_current_app_user)):
+    return get_broadcast_status(token)
+
+@app.get("/api/slack/broadcast/stream")
+async def slack_broadcast_stream(request: Request,
+                                 token: str = Depends(get_slack_session_token),
+                                 jwt: Optional[str] = None):
+    if jwt:
+        decode_jwt(jwt)
+    else:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            decode_jwt(auth[7:])
+        else:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+
+    async def event_generator():
+        last_sent = 0
+        last_log_len = 0
+        while True:
+            status = get_broadcast_status(token)
+            log_len = len(status.get("log", []))
+            if log_len != last_log_len or status.get("sent", 0) != last_sent:
+                last_sent = status.get("sent", 0)
+                last_log_len = log_len
+                data = json.dumps({
+                    "running": status["running"],
+                    "finished": status["finished"],
+                    "total": status["total"],
+                    "sent": status["sent"],
+                    "failed": status["failed"],
+                    "current_chat": status["current_chat"],
+                    "log": status["log"][-20:],
+                })
+                yield f"data: {data}\n\n"
+            if not status["running"] and status["finished"]:
+                yield f"data: {json.dumps({**status, 'log': status['log'][-20:]})}\n\n"
+                break
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+async def _run_slack_broadcast(req: SlackBroadcastRequest, token: str, app_user: dict):
+    client = get_slack_client(token)
+    uf = uploaded_files.get(token)
+    status = broadcast_statuses[token]
+    started_at = datetime.utcnow().isoformat()
+    sent_times = []
+
+    for i, channel_id in enumerate(req.channel_ids):
+        if not status["running"]:
+            status["log"].append("Stopped by user")
+            break
+        now = time.time()
+        sent_times = [t for t in sent_times if now - t < 60]
+        if len(sent_times) >= req.max_per_minute:
+            wait = 60 - (now - sent_times[0])
+            status["log"].append(f"Rate limit — waiting {wait:.0f}s")
+            await asyncio.sleep(wait)
+
+        try:
+            info = await asyncio.to_thread(client.conversations_info, channel=channel_id)
+            name = info["channel"].get("name", channel_id)
+            status["current_chat"] = name
+
+            if uf and os.path.exists(uf["path"]):
+                await asyncio.to_thread(
+                    client.files_upload_v2,
+                    channel=channel_id,
+                    file=uf["path"],
+                    initial_comment=req.message or "",
+                )
+            else:
+                await asyncio.to_thread(
+                    client.chat_postMessage,
+                    channel=channel_id,
+                    text=req.message,
+                )
+
+            status["sent"] += 1
+            sent_times.append(time.time())
+            status["log"].append(f"OK: {name}")
+
+        except SlackApiError as e:
+            err = e.response.get("error", str(e))
+            if err == "ratelimited":
+                retry_after = int(e.response.headers.get("Retry-After", 5))
+                status["log"].append(f"Rate limited by Slack — retrying in {retry_after}s")
+                await asyncio.sleep(retry_after)
+                try:
+                    if uf and os.path.exists(uf["path"]):
+                        await asyncio.to_thread(
+                            client.files_upload_v2,
+                            channel=channel_id,
+                            file=uf["path"],
+                            initial_comment=req.message or "",
+                        )
+                    else:
+                        await asyncio.to_thread(
+                            client.chat_postMessage,
+                            channel=channel_id,
+                            text=req.message,
+                        )
+                    status["sent"] += 1
+                    status["log"].append(f"OK (retry): {channel_id}")
+                except Exception as e2:
+                    status["failed"] += 1
+                    status["log"].append(f"FAIL [{channel_id}]: {e2}")
+            else:
+                status["failed"] += 1
+                status["log"].append(f"FAIL [{channel_id}]: {err}")
+        except Exception as e:
+            status["failed"] += 1
+            status["log"].append(f"FAIL [{channel_id}]: {e}")
+
+        if i < len(req.channel_ids) - 1 and status["running"]:
+            delay = req.delay + (random.uniform(0, 3) if req.random_delay else 0)
+            await asyncio.sleep(delay)
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        """INSERT INTO broadcast_history
+           (message, total, sent, failed, started_at, finished_at,
+            tg_session_token, app_user_id, app_username, log, channel_type)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            (req.message or "")[:200], status["total"], status["sent"], status["failed"],
+            started_at, datetime.utcnow().isoformat(),
+            token, int(app_user["sub"]), app_user["username"],
+            json.dumps(status["log"]), "slack"
+        )
+    )
+    conn.commit()
+    conn.close()
+
+    status["running"] = False
+    status["finished"] = True
+    status["current_chat"] = ""
+    status["log"].append(f"Done. Sent: {status['sent']}, Failed: {status['failed']}")
+
+# ── Slack: lists ─────────────────────────────────────────────────────────────
+
+@app.get("/api/slack/lists")
+def get_slack_lists(app_user: dict = Depends(get_current_app_user)):
+    conn = sqlite3.connect(DB_PATH)
+    if app_user["role"] == "admin":
+        rows = conn.execute(
+            "SELECT id, name, chats, created_at FROM chat_lists WHERE channel_type='slack' ORDER BY id DESC"
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT id, name, chats, created_at FROM chat_lists WHERE channel_type='slack' AND owner_app_user_id=? ORDER BY id DESC",
+            (int(app_user["sub"]),)
+        ).fetchall()
+    conn.close()
+    return {"lists": [{"id": r[0], "name": r[1], "channels": json.loads(r[2]), "created_at": r[3]} for r in rows]}
+
+@app.post("/api/slack/lists")
+def save_slack_list(req: SlackSaveListRequest, app_user: dict = Depends(get_current_app_user)):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT INTO chat_lists (name, chats, created_at, owner_app_user_id, channel_type) VALUES (?,?,?,?,?)",
+        (req.name, json.dumps(req.channel_ids), datetime.utcnow().isoformat(),
+         int(app_user["sub"]), "slack")
+    )
+    conn.commit()
+    conn.close()
+    return {"saved": True}
+
+@app.delete("/api/slack/lists/{list_id}")
+def delete_slack_list(list_id: int, app_user: dict = Depends(get_current_app_user)):
+    conn = sqlite3.connect(DB_PATH)
+    if app_user["role"] == "admin":
+        conn.execute("DELETE FROM chat_lists WHERE id=? AND channel_type='slack'", (list_id,))
+    else:
+        conn.execute("DELETE FROM chat_lists WHERE id=? AND channel_type='slack' AND owner_app_user_id=?",
+                     (list_id, int(app_user["sub"])))
+    conn.commit()
+    conn.close()
+    return {"deleted": True}
+
 # ── Health ────────────────────────────────────────────────────────────────────
 @app.get("/health")
 def health():
     backup_dir = os.path.join(DATA_DIR, "backups")
     backups = sorted(os.listdir(backup_dir)) if os.path.exists(backup_dir) else []
-    return {"status": "ok", "sessions": len(tg_clients), "last_backup": backups[-1] if backups else None}
+    return {
+        "status": "ok",
+        "sessions": len(tg_clients),
+        "slack_sessions": len(slack_clients),
+        "last_backup": backups[-1] if backups else None,
+    }
