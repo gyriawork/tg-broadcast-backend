@@ -174,6 +174,23 @@
   .settings-tab { padding: 8px 16px; border-radius: var(--radius) var(--radius) 0 0; cursor: pointer; border: 1px solid var(--border); border-bottom: none; background: transparent; color: var(--muted); font-family: inherit; font-size: 12px; transition: all .2s; }
   .settings-tab.active { background: var(--surface); color: var(--accent); }
 
+  .dash-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .dash-card { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; text-align: center; }
+  .dash-card-val { font-size: 28px; font-family: 'Syne', sans-serif; font-weight: 800; color: var(--accent); }
+  .dash-card-label { font-size: 10px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-top: 4px; }
+  .bar-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .bar-name { width: 140px; font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; }
+  .bar-fill-bg { flex: 1; height: 20px; background: var(--bg); border-radius: 4px; overflow: hidden; }
+  .bar-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width .3s; min-width: 2px; }
+  .bar-count { width: 50px; text-align: right; font-size: 12px; color: var(--muted); flex-shrink: 0; }
+  .acc-checkbox { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+  .bulk-bar { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--surface2); border: 1px solid var(--accent2); border-radius: var(--radius); margin-bottom: 12px; }
+  .tag-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 10px; font-size: 10px; background: rgba(0,212,255,0.1); color: var(--accent); border: 1px solid var(--accent2); }
+  .tag-chip-rm { cursor: pointer; font-size: 12px; opacity: 0.6; }
+  .tag-chip-rm:hover { opacity: 1; }
+  .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 500; display: flex; align-items: center; justify-content: center; }
+  .modal-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; min-width: 360px; max-width: 480px; }
+
   @keyframes spin { to { transform: rotate(360deg); } }
   .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; }
 
@@ -218,7 +235,9 @@ function apiHeaders() {
 const api = {
   get: (path) => fetch(API_BASE+path, {headers:apiHeaders()}).then(r => {if(!r.ok) return r.json().then(e=>{throw new Error(e.detail||r.status)}).catch(()=>{throw new Error(r.status)}); return r.json();}),
   post: (path, body) => fetch(API_BASE+path, {method:'POST', headers:apiHeaders(), body:JSON.stringify(body)}).then(r => {if(!r.ok) return r.json().then(e=>{throw new Error(e.detail||r.status)}); return r.json();}),
+  put: (path, body) => fetch(API_BASE+path, {method:'PUT', headers:apiHeaders(), body:JSON.stringify(body)}).then(r => {if(!r.ok) return r.json().then(e=>{throw new Error(e.detail||r.status)}); return r.json();}),
   del: (path) => fetch(API_BASE+path, {method:'DELETE', headers:apiHeaders()}).then(r => r.json()),
+  del_body: (path, body) => fetch(API_BASE+path, {method:'DELETE', headers:apiHeaders(), body:JSON.stringify(body)}).then(r => r.json()),
 };
 
 // ── Settings Screen (backend URL) ───────────────────────────────────────────
@@ -738,6 +757,292 @@ function HistoryPage() {
   );
 }
 
+// ── Accounts Page ──────────────────────────────────────────────────────────
+function AccountsPage() {
+  const [accounts, setAccounts] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const perPage = 50;
+  const [search, setSearch] = useState('');
+  const [filterMessenger, setFilterMessenger] = useState('');
+  const [filterType, setFilterType] = useState('');
+  const [filterOwner, setFilterOwner] = useState('');
+  const [filterTag, setFilterTag] = useState('');
+  const [tags, setTags] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [selected, setSelected] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [newTag, setNewTag] = useState('');
+  const [modal, setModal] = useState(null); // 'owner' | 'tags' | null
+  const [modalOwner, setModalOwner] = useState('');
+  const [modalTags, setModalTags] = useState([]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      let q = '/api/accounts?page='+page+'&per_page='+perPage;
+      if (search) q += '&search='+encodeURIComponent(search);
+      if (filterMessenger) q += '&messenger='+filterMessenger;
+      if (filterType) q += '&type='+filterType;
+      if (filterOwner) q += '&owner_id='+filterOwner;
+      if (filterTag) q += '&tags='+filterTag;
+      const r = await api.get(q);
+      setAccounts(r.accounts||[]);
+      setTotal(r.total||0);
+    } catch(e) {}
+    setLoading(false);
+  }, [page, search, filterMessenger, filterType, filterOwner, filterTag]);
+
+  const loadTags = () => api.get('/api/accounts/tags').then(r => setTags(r.tags||[])).catch(()=>{});
+  const loadUsers = () => api.get('/api/auth/users').then(r => setUsers(r.users||r||[])).catch(()=>{});
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadTags(); loadUsers(); }, []);
+
+  const toggleSelect = (id) => setSelected(p => p.includes(id) ? p.filter(x=>x!==id) : [...p,id]);
+  const selectAll = () => setSelected(accounts.map(a=>a.id));
+  const clearAll = () => setSelected([]);
+
+  const addTag = async () => {
+    if (!newTag.trim()) return;
+    await api.post('/api/accounts/tags', {name: newTag.trim()});
+    setNewTag('');
+    loadTags();
+  };
+
+  const deleteTag = async (id) => {
+    await api.del('/api/accounts/tags/'+id);
+    loadTags();
+    load();
+  };
+
+  const doBulkOwner = async () => {
+    if (!selected.length) return;
+    await api.put('/api/accounts/bulk/owner', {account_ids: selected, owner_id: modalOwner ? parseInt(modalOwner) : null});
+    setModal(null);
+    setSelected([]);
+    load();
+  };
+
+  const doBulkTags = async () => {
+    if (!selected.length || !modalTags.length) return;
+    await api.post('/api/accounts/bulk/tags', {account_ids: selected, tag_ids: modalTags.map(Number)});
+    setModal(null);
+    setModalTags([]);
+    setSelected([]);
+    load();
+  };
+
+  const doBulkRemoveTags = async () => {
+    if (!selected.length || !modalTags.length) return;
+    await api.del_body('/api/accounts/bulk/tags', {account_ids: selected, tag_ids: modalTags.map(Number)});
+    setModal(null);
+    setModalTags([]);
+    setSelected([]);
+    load();
+  };
+
+  const totalPages = Math.ceil(total / perPage);
+  const messengerBadge = (m) => m==='telegram' ? h('span',{className:'badge badge-tg'},'TG') : h('span',{className:'badge badge-slack'},'Slack');
+  const typeBadge = (t) => {
+    if(t==='channel') return h('span',{className:'badge badge-blue'},'Channel');
+    if(t==='group') return h('span',{className:'badge badge-green'},'Group');
+    return h('span',{className:'badge badge-mixed'},'DM');
+  };
+
+  return h('div',{className:'page'},
+    // Filters
+    h('div',{className:'card'},
+      h('div',{className:'card-title'},'Accounts'),
+      h('div',{className:'search-row'},
+        h('input',{type:'text',placeholder:'Search by name...',value:search,
+          onChange:e=>{setSearch(e.target.value);setPage(1);}})
+      ),
+      h('div',{className:'filter-row'},
+        h('span',{style:{fontSize:11,color:'var(--muted)',marginRight:4}},'Messenger:'),
+        ['','telegram','slack'].map(v=>
+          h('button',{key:'m'+v,className:'filter-btn'+(filterMessenger===v?' active':''),
+            onClick:()=>{setFilterMessenger(v);setPage(1);}}, v||'All')
+        )
+      ),
+      h('div',{className:'filter-row'},
+        h('span',{style:{fontSize:11,color:'var(--muted)',marginRight:4}},'Type:'),
+        ['','channel','group','dm'].map(v=>
+          h('button',{key:'t'+v,className:'filter-btn'+(filterType===v?' active':''),
+            onClick:()=>{setFilterType(v);setPage(1);}}, v||'All')
+        )
+      ),
+      h('div',{className:'filter-row'},
+        h('span',{style:{fontSize:11,color:'var(--muted)',marginRight:4}},'Owner:'),
+        h('button',{className:'filter-btn'+(filterOwner===''?' active':''),onClick:()=>{setFilterOwner('');setPage(1);}},'All'),
+        h('button',{className:'filter-btn'+(filterOwner==='unassigned'?' active':''),onClick:()=>{setFilterOwner('unassigned');setPage(1);}},'Unassigned'),
+        users.map(u=>h('button',{key:'o'+u.id,className:'filter-btn'+(filterOwner===String(u.id)?' active':''),
+          onClick:()=>{setFilterOwner(String(u.id));setPage(1);}},u.username))
+      ),
+      tags.length>0 && h('div',{className:'filter-row'},
+        h('span',{style:{fontSize:11,color:'var(--muted)',marginRight:4}},'Tag:'),
+        h('button',{className:'filter-btn'+(filterTag===''?' active':''),onClick:()=>{setFilterTag('');setPage(1);}},'All'),
+        tags.map(t=>h('button',{key:'tag'+t.id,className:'filter-btn'+(filterTag===String(t.id)?' active':''),
+          onClick:()=>{setFilterTag(String(t.id));setPage(1);}},t.name))
+      )
+    ),
+
+    // Tag management
+    h('div',{className:'card'},
+      h('div',{className:'card-title'},'Tags'),
+      h('div',{style:{display:'flex',gap:8,alignItems:'flex-end',marginBottom:12}},
+        h('input',{type:'text',placeholder:'New tag name',value:newTag,onChange:e=>setNewTag(e.target.value),
+          style:{width:200},onKeyDown:e=>{if(e.key==='Enter')addTag();}}),
+        h('button',{className:'btn btn-primary btn-sm',onClick:addTag,disabled:!newTag.trim()},'Add')
+      ),
+      h('div',{style:{display:'flex',gap:6,flexWrap:'wrap'}},
+        tags.map(t=>h('span',{key:t.id,className:'tag-chip'},
+          t.name,
+          h('span',{className:'tag-chip-rm',onClick:()=>deleteTag(t.id)},'\u00d7')
+        ))
+      )
+    ),
+
+    // Bulk actions bar
+    selected.length>0 && h('div',{className:'bulk-bar'},
+      h('span',{style:{fontSize:12}},selected.length+' selected'),
+      h('button',{className:'btn btn-primary btn-sm',onClick:()=>{setModalOwner('');setModal('owner');}},'Assign Owner'),
+      h('button',{className:'btn btn-secondary btn-sm',onClick:()=>{setModalTags([]);setModal('tags');}},'Add Tags'),
+      h('button',{className:'btn btn-danger btn-sm',onClick:()=>{setModalTags([]);setModal('removetags');}},'Remove Tags'),
+      h('button',{className:'btn btn-secondary btn-sm',onClick:clearAll},'Clear')
+    ),
+
+    // Table
+    h('div',{className:'card'},
+      loading ? h('div',{style:{textAlign:'center',padding:20}},h('span',{className:'spinner'})) :
+      h('div',{style:{overflowX:'auto'}},
+        h('table',null,
+          h('thead',null,h('tr',null,
+            h('th',{style:{width:30}},h('input',{type:'checkbox',className:'acc-checkbox',
+              checked:selected.length===accounts.length&&accounts.length>0,
+              onChange:e=>e.target.checked?selectAll():clearAll()})),
+            h('th',null,'Name'),
+            h('th',null,'Messenger'),
+            h('th',null,'External Channel'),
+            h('th',null,'Type'),
+            h('th',null,'Tags'),
+            h('th',null,'Owner'),
+            h('th',null,'Created At')
+          )),
+          h('tbody',null,
+            accounts.length===0 ? h('tr',null,h('td',{colSpan:8,style:{color:'var(--muted)',textAlign:'center'}},'No accounts found')) :
+            accounts.map(a=>h('tr',{key:a.id},
+              h('td',null,h('input',{type:'checkbox',className:'acc-checkbox',checked:selected.includes(a.id),onChange:()=>toggleSelect(a.id)})),
+              h('td',null,a.name),
+              h('td',null,messengerBadge(a.messenger)),
+              h('td',{style:{fontSize:11,color:'var(--muted)'}},a.external_channel),
+              h('td',null,typeBadge(a.type)),
+              h('td',null,h('div',{style:{display:'flex',gap:4,flexWrap:'wrap'}},
+                (a.tags||[]).map(t=>h('span',{key:t.id,className:'tag-chip'},t.name)))),
+              h('td',null,a.owner_name ? h('span',{className:'badge badge-blue'},a.owner_name) : h('span',{style:{color:'var(--muted)',fontSize:11}},'—')),
+              h('td',{style:{color:'var(--muted)',fontSize:11}},a.created_at?.slice(0,16).replace('T',' '))
+            ))
+          )
+        )
+      ),
+      // Pagination
+      totalPages>1 && h('div',{style:{display:'flex',justifyContent:'center',gap:8,marginTop:12}},
+        h('button',{className:'btn btn-secondary btn-sm',disabled:page<=1,onClick:()=>setPage(page-1)},'Prev'),
+        h('span',{style:{fontSize:12,color:'var(--muted)',lineHeight:'30px'}},
+          'Page '+page+' of '+totalPages+' ('+total+' total)'),
+        h('button',{className:'btn btn-secondary btn-sm',disabled:page>=totalPages,onClick:()=>setPage(page+1)},'Next')
+      )
+    ),
+
+    // Modals
+    modal==='owner' && h('div',{className:'modal-overlay',onClick:()=>setModal(null)},
+      h('div',{className:'modal-box',onClick:e=>e.stopPropagation()},
+        h('div',{className:'card-title'},'Assign Owner'),
+        h('select',{value:modalOwner,onChange:e=>setModalOwner(e.target.value),
+          style:{width:'100%',padding:'8px 12px',background:'var(--bg)',border:'1px solid var(--border)',
+            borderRadius:'var(--radius)',color:'var(--text)',fontFamily:'inherit',fontSize:13,marginBottom:16}},
+          h('option',{value:''},'— Unassign —'),
+          users.map(u=>h('option',{key:u.id,value:String(u.id)},u.username))
+        ),
+        h('div',{style:{display:'flex',gap:8,justifyContent:'flex-end'}},
+          h('button',{className:'btn btn-secondary btn-sm',onClick:()=>setModal(null)},'Cancel'),
+          h('button',{className:'btn btn-primary btn-sm',onClick:doBulkOwner},'Apply')
+        )
+      )
+    ),
+
+    (modal==='tags'||modal==='removetags') && h('div',{className:'modal-overlay',onClick:()=>setModal(null)},
+      h('div',{className:'modal-box',onClick:e=>e.stopPropagation()},
+        h('div',{className:'card-title'},modal==='tags'?'Add Tags':'Remove Tags'),
+        h('div',{style:{display:'flex',flexDirection:'column',gap:8,marginBottom:16}},
+          tags.map(t=>h('label',{key:t.id,style:{display:'flex',alignItems:'center',gap:8,cursor:'pointer',margin:0}},
+            h('input',{type:'checkbox',checked:modalTags.includes(String(t.id)),
+              onChange:e=>setModalTags(p=>e.target.checked?[...p,String(t.id)]:p.filter(x=>x!==String(t.id)))}),
+            h('span',{style:{fontSize:12}},t.name)
+          ))
+        ),
+        tags.length===0 && h('p',{style:{color:'var(--muted)',fontSize:12,marginBottom:16}},'No tags created yet.'),
+        h('div',{style:{display:'flex',gap:8,justifyContent:'flex-end'}},
+          h('button',{className:'btn btn-secondary btn-sm',onClick:()=>setModal(null)},'Cancel'),
+          h('button',{className:'btn '+(modal==='removetags'?'btn-danger':'btn-primary')+' btn-sm',
+            onClick:modal==='tags'?doBulkTags:doBulkRemoveTags,disabled:!modalTags.length},
+            modal==='tags'?'Add':'Remove')
+        )
+      )
+    )
+  );
+}
+
+// ── Dashboard Page ─────────────────────────────────────────────────────────
+function DashboardPage() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get('/api/dashboard').then(r => setData(r)).catch(()=>{}).finally(()=>setLoading(false));
+  }, []);
+
+  if (loading) return h('div',{className:'page',style:{display:'flex',alignItems:'center',justifyContent:'center'}},
+    h('span',{className:'spinner'}));
+  if (!data) return h('div',{className:'page'},h('div',{className:'card'},h('p',{style:{color:'var(--muted)'}},'Failed to load dashboard')));
+
+  const maxCount = Math.max(1, ...data.chats_by_manager.map(m=>m.chats_count));
+
+  return h('div',{className:'page'},
+    h('div',{className:'card'},
+      h('div',{className:'card-title'},'Dashboard'),
+      h('div',{className:'dash-grid'},
+        [{label:'Total Chats',val:data.total_chats,color:'var(--accent)'},
+         {label:'Telegram',val:data.telegram_chats,color:'var(--tg)'},
+         {label:'Slack',val:data.slack_chats,color:'var(--slack)'},
+         {label:'Channels',val:data.channels,color:'var(--accent)'},
+         {label:'Groups',val:data.groups,color:'var(--green)'},
+         {label:'DM',val:data.dm,color:'var(--yellow)'}
+        ].map(c=>h('div',{key:c.label,className:'dash-card'},
+          h('div',{className:'dash-card-val',style:{color:c.color}},c.val),
+          h('div',{className:'dash-card-label'},c.label)
+        ))
+      )
+    ),
+
+    h('div',{className:'card'},
+      h('div',{className:'card-title'},'Chats by Manager'),
+      data.chats_by_manager.length===0
+        ? h('p',{style:{color:'var(--muted)',fontSize:12}},'No data')
+        : data.chats_by_manager.map(m=>
+            h('div',{key:m.manager_name,className:'bar-row'},
+              h('div',{className:'bar-name'},m.manager_name),
+              h('div',{className:'bar-fill-bg'},
+                h('div',{className:'bar-fill',style:{width:Math.round(m.chats_count/maxCount*100)+'%',
+                  background:m.manager_name==='Unassigned'?'var(--muted)':'var(--accent)'}})
+              ),
+              h('div',{className:'bar-count'},m.chats_count)
+            )
+          )
+    )
+  );
+}
+
 // ── App ─────────────────────────────────────────────────────────────────────
 function App() {
   const [appUser, setAppUser] = useState(null);
@@ -808,6 +1113,8 @@ function App() {
     h('div',{className:'nav'},
       [['broadcast','Broadcast'+(selected.length?' ('+selected.length+')':'')],
        ['chats','Chats'],
+       ['accounts','Accounts'],
+       ['dashboard','Dashboard'],
        ['history','History'],
        ['settings','Settings']].map(([k,l])=>
         h('button',{key:k,className:'nav-btn'+(tab===k?' active':''),onClick:()=>setTab(k)},l)
@@ -816,6 +1123,8 @@ function App() {
     h('div',{style:{flex:1,overflow:'auto'}},
       tab==='broadcast' && h(UnifiedBroadcastPage,{selected}),
       tab==='chats' && h(UnifiedChatsPage,{selected,setSelected}),
+      tab==='accounts' && h(AccountsPage,null),
+      tab==='dashboard' && h(DashboardPage,null),
       tab==='history' && h(HistoryPage,null),
       tab==='settings' && h(SettingsPage,{integrations,onRefresh:loadIntegrations})
     )
