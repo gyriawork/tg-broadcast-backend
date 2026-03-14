@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>TG Broadcast</title>
+<title>Broadcast Service</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
 <style>
@@ -20,22 +20,20 @@
     --text: #c8dde8;
     --muted: #4a6070;
     --radius: 6px;
+    --slack: #e01e5a;
+    --tg: #2aabee;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 13px; }
   #root { min-height: 100vh; display: flex; flex-direction: column; }
-
-  /* Scrollbar */
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: var(--bg); }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
-  /* Header */
   .header {
     display: flex; align-items: center; justify-content: space-between;
     padding: 16px 28px; border-bottom: 1px solid var(--border);
-    background: var(--surface);
-    position: sticky; top: 0; z-index: 100;
+    background: var(--surface); position: sticky; top: 0; z-index: 100;
   }
   .header-logo { display: flex; align-items: center; gap: 10px; }
   .logo-icon { width: 32px; height: 32px; background: var(--accent); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
@@ -44,7 +42,6 @@
   .header-user { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
   .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); }
 
-  /* Nav */
   .nav { display: flex; gap: 2px; padding: 12px 28px; border-bottom: 1px solid var(--border); background: var(--bg); }
   .nav-btn {
     padding: 6px 16px; border-radius: var(--radius); cursor: pointer; border: none;
@@ -54,18 +51,12 @@
   .nav-btn:hover { color: var(--text); background: var(--surface); }
   .nav-btn.active { color: var(--accent); background: var(--surface); border-bottom: 2px solid var(--accent); }
 
-  /* Main layout */
   .main { flex: 1; display: flex; gap: 0; overflow: hidden; }
   .page { flex: 1; padding: 28px; overflow-y: auto; }
 
-  /* Cards */
-  .card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 20px; margin-bottom: 16px;
-  }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; }
   .card-title { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 14px; color: var(--accent); margin-bottom: 16px; letter-spacing: 0.5px; text-transform: uppercase; }
 
-  /* Form */
   label { display: block; font-size: 11px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; margin-top: 14px; }
   label:first-of-type { margin-top: 0; }
   input[type="text"], input[type="tel"], input[type="number"], input[type="password"], textarea {
@@ -76,7 +67,6 @@
   input:focus, textarea:focus { border-color: var(--accent); }
   textarea { resize: vertical; min-height: 100px; }
 
-  /* Buttons */
   .btn {
     display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px;
     border-radius: var(--radius); border: none; cursor: pointer; font-family: inherit;
@@ -92,7 +82,6 @@
   .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
   .btn-sm { padding: 6px 12px; font-size: 11px; }
 
-  /* Toggle */
   .toggle-row { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; }
   .toggle-label { font-size: 12px; color: var(--text); }
   .toggle { position: relative; width: 40px; height: 22px; }
@@ -108,7 +97,6 @@
   input:checked + .toggle-slider { background: var(--accent2); }
   input:checked + .toggle-slider:before { transform: translateX(18px); background: var(--accent); }
 
-  /* Chat list */
   .chat-list { max-height: 420px; overflow-y: auto; }
   .chat-item {
     display: flex; align-items: center; gap: 12px; padding: 10px 12px;
@@ -121,15 +109,12 @@
     width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
     font-size: 14px; font-weight: bold; flex-shrink: 0;
   }
-  .chat-avatar.group { background: rgba(0,212,255,0.15); color: var(--accent); }
-  .chat-avatar.channel { background: rgba(0,144,204,0.15); color: var(--accent2); }
   .chat-info { flex: 1; min-width: 0; }
   .chat-name { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .chat-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
   .chat-check { width: 18px; height: 18px; border: 2px solid var(--border); border-radius: 4px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
   .chat-item.selected .chat-check { background: var(--accent); border-color: var(--accent); }
 
-  /* Progress */
   .progress-bar { width: 100%; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin: 12px 0; }
   .progress-fill { height: 100%; background: var(--accent); transition: width .3s; }
   .stats-row { display: flex; gap: 16px; margin: 12px 0; }
@@ -140,7 +125,6 @@
   .val-red { color: var(--red); }
   .val-blue { color: var(--accent); }
 
-  /* Log */
   .log-box {
     background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
     padding: 12px; font-size: 12px; line-height: 1.7; max-height: 260px; overflow-y: auto;
@@ -148,33 +132,27 @@
   }
   .log-line { padding: 1px 0; }
 
-  /* Login page */
   .login-wrap { max-width: 440px; margin: 60px auto; }
   .login-hero { text-align: center; margin-bottom: 32px; }
   .login-hero h1 { font-family: 'Syne', sans-serif; font-size: 36px; font-weight: 800; color: var(--accent); }
   .login-hero p { color: var(--muted); margin-top: 8px; font-size: 12px; }
 
-  /* Alert */
   .alert { padding: 10px 14px; border-radius: var(--radius); font-size: 12px; margin-top: 12px; }
   .alert-err { background: rgba(255,68,102,0.1); border: 1px solid rgba(255,68,102,0.3); color: var(--red); }
   .alert-ok { background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.25); color: var(--green); }
   .alert-info { background: rgba(0,212,255,0.08); border: 1px solid rgba(0,212,255,0.2); color: var(--accent); }
 
-  /* Sidebar */
   .sidebar { width: 280px; background: var(--surface); border-left: 1px solid var(--border); padding: 20px; overflow-y: auto; }
   .sidebar-title { font-size: 11px; color: var(--muted); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 12px; }
 
-  /* Chips */
-  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 11px; background: var(--surface2); border: 1px solid var(--border); color: var(--muted); cursor: pointer; }
-  .chip:hover { border-color: var(--accent); color: var(--accent); }
-
-  /* Badge */
   .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; letter-spacing: 0.5px; }
   .badge-blue { background: rgba(0,212,255,0.15); color: var(--accent); }
   .badge-green { background: rgba(0,255,136,0.12); color: var(--green); }
   .badge-red { background: rgba(255,68,102,0.12); color: var(--red); }
+  .badge-tg { background: rgba(42,171,238,0.12); color: var(--tg); }
+  .badge-slack { background: rgba(224,30,90,0.12); color: var(--slack); }
+  .badge-mixed { background: rgba(255,204,0,0.12); color: var(--yellow); }
 
-  /* History table */
   table { width: 100%; border-collapse: collapse; }
   th { font-size: 10px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); }
   td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text); }
@@ -182,38 +160,28 @@
 
   .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   .row-gap { display: flex; gap: 10px; align-items: flex-end; margin-top: 14px; }
-  .flex-end { display: flex; justify-content: flex-end; }
-  .mt { margin-top: 12px; }
   .sep { height: 1px; background: var(--border); margin: 16px 0; }
+  .selected-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .search-row { margin-bottom: 10px; }
+  .current-tag { font-size: 11px; color: var(--accent); padding: 3px 8px; border: 1px solid var(--accent2); border-radius: 4px; }
+  .filter-row { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+  .filter-btn { padding: 4px 12px; border-radius: 20px; cursor: pointer; border: 1px solid var(--border); background: transparent; color: var(--muted); font-family: inherit; font-size: 11px; transition: all .2s; }
+  .filter-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .filter-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(0,212,255,0.08); }
+  .integration-status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 11px; }
+  .int-active { background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.2); color: var(--green); }
+  .int-inactive { background: rgba(74,96,112,0.15); border: 1px solid var(--border); color: var(--muted); }
+  .settings-tab { padding: 8px 16px; border-radius: var(--radius) var(--radius) 0 0; cursor: pointer; border: 1px solid var(--border); border-bottom: none; background: transparent; color: var(--muted); font-family: inherit; font-size: 12px; transition: all .2s; }
+  .settings-tab.active { background: var(--surface); color: var(--accent); }
 
-  /* Spinner */
   @keyframes spin { to { transform: rotate(360deg); } }
   .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; }
 
-  /* Scan line effect */
   body::before {
     content: ''; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
     background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,212,255,0.01) 2px, rgba(0,212,255,0.01) 4px);
     pointer-events: none; z-index: 9999;
   }
-
-  .selected-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-  .search-row { margin-bottom: 10px; }
-  .current-tag { font-size: 11px; color: var(--accent); padding: 3px 8px; border: 1px solid var(--accent2); border-radius: 4px; }
-
-  /* Platform switcher */
-  .platform-switch { display: flex; gap: 2px; padding: 3px; background: var(--bg); border-radius: var(--radius); border: 1px solid var(--border); }
-  .platform-btn {
-    padding: 5px 14px; border-radius: 4px; cursor: pointer; border: none;
-    background: transparent; color: var(--muted); font-family: inherit; font-size: 11px;
-    font-weight: 500; letter-spacing: 0.5px; transition: all .2s;
-  }
-  .platform-btn:hover { color: var(--text); }
-  .platform-btn.active-tg { background: #2aabee22; color: #2aabee; }
-  .platform-btn.active-slack { background: #4a154b22; color: #e01e5a; }
-  .slack-accent { color: #e01e5a; }
-  .badge-slack { background: rgba(224,30,90,0.12); color: #e01e5a; }
-  .badge-tg { background: rgba(42,171,238,0.12); color: #2aabee; }
 </style>
 </head>
 <body>
@@ -223,99 +191,118 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script>
 const { useState, useEffect, useRef, useCallback } = React;
+const h = React.createElement;
+const F = React.Fragment;
 
-// ── API URL — берём из sessionStorage или prompt при первом запуске ───────────
+// ── API config ──────────────────────────────────────────────────────────────
 function getApiBase() {
-  // Сначала смотрим sessionStorage (не localStorage — намеренно, для безопасности)
-  let base = sessionStorage.getItem('api_base');
-  if (base) return base;
-  // Иначе — дефолт для локального запуска
-  return 'http://localhost:8000';
+  return sessionStorage.getItem('api_base') || 'http://localhost:8000';
 }
 let API_BASE = getApiBase();
+let JWT_TOKEN = sessionStorage.getItem('jwt_token') || '';
+let TG_SESSION = sessionStorage.getItem('tg_session') || '';
+let SLACK_SESSION = sessionStorage.getItem('slack_session') || '';
 
-const api = {
-  get: (path) => fetch(API_BASE + path).then(r => { if(!r.ok) throw new Error(r.status); return r.json(); }),
-  post: (path, body) => fetch(API_BASE + path, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }).then(r => { if(!r.ok) return r.json().then(e => { throw new Error(e.detail || r.status); }); return r.json(); }),
-  del: (path) => fetch(API_BASE + path, { method:'DELETE' }).then(r => r.json()),
-};
+function setJwt(t) { JWT_TOKEN = t; if(t) sessionStorage.setItem('jwt_token',t); else sessionStorage.removeItem('jwt_token'); }
+function setTgSession(t) { TG_SESSION = t; if(t) sessionStorage.setItem('tg_session',t); else sessionStorage.removeItem('tg_session'); }
+function setSlackSession(t) { SLACK_SESSION = t; if(t) sessionStorage.setItem('slack_session',t); else sessionStorage.removeItem('slack_session'); }
 
-// ── Slack API helper — includes X-Slack-Session-Token header ────────────────
-let SLACK_SESSION_TOKEN = sessionStorage.getItem('slack_session_token') || '';
-
-const slackApi = {
-  get: (path) => fetch(API_BASE + path, { headers: { 'X-Slack-Session-Token': SLACK_SESSION_TOKEN } }).then(r => { if(!r.ok) throw new Error(r.status); return r.json(); }),
-  post: (path, body) => fetch(API_BASE + path, { method:'POST', headers:{'Content-Type':'application/json', 'X-Slack-Session-Token': SLACK_SESSION_TOKEN}, body: JSON.stringify(body) }).then(r => { if(!r.ok) return r.json().then(e => { throw new Error(e.detail || r.status); }); return r.json(); }),
-  del: (path) => fetch(API_BASE + path, { method:'DELETE', headers: { 'X-Slack-Session-Token': SLACK_SESSION_TOKEN } }).then(r => r.json()),
-};
-
-function setSlackToken(token) {
-  SLACK_SESSION_TOKEN = token;
-  if (token) sessionStorage.setItem('slack_session_token', token);
-  else sessionStorage.removeItem('slack_session_token');
+function apiHeaders() {
+  const h = {'Content-Type':'application/json'};
+  if (JWT_TOKEN) h['Authorization'] = 'Bearer ' + JWT_TOKEN;
+  if (TG_SESSION) h['X-Session-Token'] = TG_SESSION;
+  if (SLACK_SESSION) h['X-Slack-Session-Token'] = SLACK_SESSION;
+  return h;
 }
 
-// ── Settings Screen — ввод URL бэкенда ──────────────────────────────────────
-function SettingsScreen({ onSave }) {
+const api = {
+  get: (path) => fetch(API_BASE+path, {headers:apiHeaders()}).then(r => {if(!r.ok) return r.json().then(e=>{throw new Error(e.detail||r.status)}).catch(()=>{throw new Error(r.status)}); return r.json();}),
+  post: (path, body) => fetch(API_BASE+path, {method:'POST', headers:apiHeaders(), body:JSON.stringify(body)}).then(r => {if(!r.ok) return r.json().then(e=>{throw new Error(e.detail||r.status)}); return r.json();}),
+  del: (path) => fetch(API_BASE+path, {method:'DELETE', headers:apiHeaders()}).then(r => r.json()),
+};
+
+// ── Settings Screen (backend URL) ───────────────────────────────────────────
+function SettingsScreen({onSave}) {
   const [url, setUrl] = useState(API_BASE);
   const [testing, setTesting] = useState(false);
   const [err, setErr] = useState('');
   const [ok, setOk] = useState(false);
-
   const test = async () => {
     setTesting(true); setErr(''); setOk(false);
-    try {
-      const r = await fetch(url.replace(/\/$/, '') + '/health');
-      if (r.ok) { setOk(true); }
-      else setErr('Сервер ответил с ошибкой: ' + r.status);
-    } catch(e) { setErr('Не удалось подключиться. Проверь URL.'); }
-    setTesting(false);
+    try { const r = await fetch(url.replace(/\/$/,'')+'/health'); if(r.ok) setOk(true); else setErr('Error: '+r.status); }
+    catch(e) { setErr('Cannot connect'); } setTesting(false);
   };
-
-  const save = () => {
-    const clean = url.replace(/\/$/, '');
-    sessionStorage.setItem('api_base', clean);
-    API_BASE = clean;
-    onSave();
-  };
-
-  return (
-    <div className="login-wrap">
-      <div className="login-hero">
-        <h1>📡 TG Broadcast</h1>
-        <p>Укажи адрес твоего бэкенда на Railway</p>
-      </div>
-      <div className="card">
-        <div className="card-title">🌐 Адрес бэкенда</div>
-        <p style={{fontSize:'12px',color:'var(--muted)',marginBottom:12}}>
-          Скопируй URL из Railway (вкладка Settings → Domains) и вставь сюда.
-          Выглядит примерно так: <span style={{color:'var(--accent)'}}>https://xxx.railway.app</span>
-        </p>
-        <label>Backend URL</label>
-        <input type="text" placeholder="https://your-app.railway.app" value={url} onChange={e=>setUrl(e.target.value)} />
-        {err && <div className="alert alert-err" style={{marginTop:8}}>{err}</div>}
-        {ok && <div className="alert alert-ok" style={{marginTop:8}}>✅ Сервер доступен!</div>}
-        <div className="row-gap" style={{marginTop:14}}>
-          <button className="btn btn-secondary" onClick={test} disabled={testing || !url}>
-            {testing ? <><span className="spinner"/> Проверка…</> : '🔍 Проверить'}
-          </button>
-          <button className="btn btn-primary" onClick={save} disabled={!url}>
-            Сохранить →
-          </button>
-        </div>
-      </div>
-      <div style={{textAlign:'center',marginTop:12}}>
-        <span style={{fontSize:11,color:'var(--muted)'}}>Для локального запуска оставь </span>
-        <span style={{fontSize:11,color:'var(--accent)'}}>http://localhost:8000</span>
-        <span style={{fontSize:11,color:'var(--muted)'}}> и нажми Сохранить</span>
-      </div>
-    </div>
+  const save = () => { const c=url.replace(/\/$/,''); sessionStorage.setItem('api_base',c); API_BASE=c; onSave(); };
+  return h('div',{className:'login-wrap'},
+    h('div',{className:'login-hero'}, h('h1',null,'Broadcast Service'), h('p',null,'Enter your backend URL')),
+    h('div',{className:'card'},
+      h('div',{className:'card-title'},'Backend URL'),
+      h('label',null,'URL'),
+      h('input',{type:'text',placeholder:'https://your-app.railway.app',value:url,onChange:e=>setUrl(e.target.value)}),
+      err && h('div',{className:'alert alert-err'},err),
+      ok && h('div',{className:'alert alert-ok'},'Server reachable!'),
+      h('div',{className:'row-gap'},
+        h('button',{className:'btn btn-secondary',onClick:test,disabled:testing}, testing?h(F,null,h('span',{className:'spinner'}),' Testing...'):'Test'),
+        h('button',{className:'btn btn-primary',onClick:save,disabled:!url},'Save')
+      )
+    )
   );
 }
 
-// ── Login Page ───────────────────────────────────────────────────────────────
-function LoginPage({ onAuth }) {
-  const [step, setStep] = useState('config'); // config | phone | code | 2fa
+// ── App Login Page ──────────────────────────────────────────────────────────
+function AppLoginPage({onAuth}) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+
+  const doLogin = async () => {
+    setLoading(true); setErr('');
+    try {
+      const r = await fetch(API_BASE+'/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username,password})});
+      if (!r.ok) { const e = await r.json(); throw new Error(e.detail||'Login failed'); }
+      const data = await r.json();
+      setJwt(data.token);
+      onAuth({username:data.username, role:data.role, id:data.id});
+    } catch(e) { setErr(e.message); }
+    setLoading(false);
+  };
+
+  return h('div',{className:'login-wrap'},
+    h('div',{className:'login-hero'}, h('h1',null,'Broadcast Service'), h('p',null,'Multi-platform broadcast tool')),
+    h('div',{className:'card'},
+      h('div',{className:'card-title'},'Login'),
+      h('label',null,'Username'),
+      h('input',{type:'text',value:username,onChange:e=>setUsername(e.target.value),placeholder:'admin'}),
+      h('label',null,'Password'),
+      h('input',{type:'password',value:password,onChange:e=>setPassword(e.target.value),onKeyDown:e=>{if(e.key==='Enter')doLogin()}}),
+      err && h('div',{className:'alert alert-err'},err),
+      h('div',{style:{marginTop:16}},
+        h('button',{className:'btn btn-primary',onClick:doLogin,disabled:loading||!username||!password},
+          loading ? h(F,null,h('span',{className:'spinner'}),' Logging in...') : 'Login')
+      )
+    )
+  );
+}
+
+// ── Settings Page (Integrations) ────────────────────────────────────────────
+function SettingsPage({integrations, onRefresh}) {
+  const [tab, setTab] = useState('telegram');
+  return h('div',{className:'page'},
+    h('div',{className:'card'},
+      h('div',{className:'card-title'},'Integrations'),
+      h('div',{style:{display:'flex',gap:4,marginBottom:16}},
+        h('button',{className:'settings-tab'+(tab==='telegram'?' active':''),onClick:()=>setTab('telegram')},'Telegram Integration'),
+        h('button',{className:'settings-tab'+(tab==='slack'?' active':''),onClick:()=>setTab('slack')},'Slack Integration')
+      ),
+      tab==='telegram' && h(TelegramSettings,{info:integrations?.telegram,onRefresh}),
+      tab==='slack' && h(SlackSettings,{info:integrations?.slack,onRefresh})
+    )
+  );
+}
+
+function TelegramSettings({info, onRefresh}) {
+  const [step, setStep] = useState('config');
   const [apiId, setApiId] = useState('');
   const [apiHash, setApiHash] = useState('');
   const [phone, setPhone] = useState('');
@@ -328,105 +315,137 @@ function LoginPage({ onAuth }) {
   const doConnect = async () => {
     setLoading(true); setErr('');
     try {
-      const r = await api.post('/api/connect', { api_id: parseInt(apiId), api_hash: apiHash });
-      if (r.authorized) { const me = await api.get('/api/me'); onAuth(me); }
+      const r = await api.post('/api/connect',{api_id:parseInt(apiId),api_hash:apiHash});
+      setTgSession(r.session_token);
+      if (r.authorized) { setMsg('Connected!'); onRefresh(); }
       else setStep('phone');
-    } catch(e) { setErr('Connection failed: ' + e.message); }
-    setLoading(false);
+    } catch(e) { setErr(e.message); } setLoading(false);
   };
-
   const doPhone = async () => {
     setLoading(true); setErr('');
-    try {
-      await api.post('/api/send_code', { phone });
-      setStep('code'); setMsg('Code sent to your Telegram!');
-    } catch(e) { setErr('Failed to send code'); }
-    setLoading(false);
+    try { await api.post('/api/send_code',{phone}); setStep('code'); setMsg('Code sent!'); }
+    catch(e) { setErr(e.message); } setLoading(false);
   };
-
   const doCode = async () => {
     setLoading(true); setErr('');
     try {
-      const r = await api.post('/api/verify_code', { code, password: password || null });
-      if (r.authorized) onAuth(r);
+      await api.post('/api/verify_code',{code,password:password||null});
+      setMsg('Telegram connected!'); onRefresh();
     } catch(e) {
-      if (e.message && e.message.includes('2FA')) setStep('2fa');
-      else setErr('Invalid code');
-    }
-    setLoading(false);
+      if (e.message&&e.message.includes('2FA')) setStep('2fa');
+      else setErr(e.message);
+    } setLoading(false);
+  };
+  const doDisconnect = async () => {
+    try { await api.post('/api/logout',{}); } catch(e) {}
+    setTgSession(''); setStep('config'); setMsg(''); onRefresh();
   };
 
-  return (
-    <div className="login-wrap">
-      <div className="login-hero">
-        <h1>📡 TG Broadcast</h1>
-        <p>Telegram user-account broadcast tool via Telethon</p>
-      </div>
+  if (info?.connected) {
+    return h(F,null,
+      h('div',{style:{display:'flex',alignItems:'center',gap:12,marginBottom:16}},
+        h('span',{className:'integration-status int-active'},'Active'),
+        h('span',{style:{color:'var(--text)'}},info.name||info.phone||'Connected')
+      ),
+      h('button',{className:'btn btn-danger btn-sm',onClick:doDisconnect},'Disconnect')
+    );
+  }
 
-      {step === 'config' && (
-        <div className="card">
-          <div className="card-title">🔑 API Credentials</div>
-          <p style={{fontSize:'12px',color:'var(--muted)',marginBottom:12}}>
-            Get your credentials from <a href="https://my.telegram.org" target="_blank" style={{color:'var(--accent)'}}>my.telegram.org</a> → API development tools
-          </p>
-          <label>API ID</label>
-          <input type="text" placeholder="12345678" value={apiId} onChange={e=>setApiId(e.target.value)} />
-          <label>API Hash</label>
-          <input type="text" placeholder="abc123..." value={apiHash} onChange={e=>setApiHash(e.target.value)} />
-          {err && <div className="alert alert-err">{err}</div>}
-          <div style={{marginTop:16}}>
-            <button className="btn btn-primary" onClick={doConnect} disabled={loading || !apiId || !apiHash}>
-              {loading ? <><span className="spinner"/> Connecting…</> : '→ Connect'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {step === 'phone' && (
-        <div className="card">
-          <div className="card-title">📱 Phone Number</div>
-          <label>Phone (international format)</label>
-          <input type="tel" placeholder="+79001234567" value={phone} onChange={e=>setPhone(e.target.value)} />
-          {err && <div className="alert alert-err">{err}</div>}
-          <div className="row-gap">
-            <button className="btn btn-secondary btn-sm" onClick={()=>setStep('config')}>← Back</button>
-            <button className="btn btn-primary" onClick={doPhone} disabled={loading || !phone}>
-              {loading ? <><span className="spinner"/> Sending…</> : 'Send Code →'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {(step === 'code' || step === '2fa') && (
-        <div className="card">
-          <div className="card-title">{step === '2fa' ? '🔐 2FA Password' : '📨 Verification Code'}</div>
-          {msg && <div className="alert alert-info" style={{marginBottom:12}}>{msg}</div>}
-          {step === 'code' && (
-            <>
-              <label>Code from Telegram</label>
-              <input type="text" placeholder="12345" value={code} onChange={e=>setCode(e.target.value)} />
-            </>
-          )}
-          <label>2FA Password {step === 'code' ? '(if enabled)' : '(required)'}</label>
-          <input type="password" placeholder="••••••••" value={password} onChange={e=>setPassword(e.target.value)} />
-          {err && <div className="alert alert-err">{err}</div>}
-          <div className="row-gap">
-            <button className="btn btn-secondary btn-sm" onClick={()=>setStep('phone')}>← Back</button>
-            <button className="btn btn-primary" onClick={doCode} disabled={loading || !code}>
-              {loading ? <><span className="spinner"/> Verifying…</> : 'Verify →'}
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
+  return h(F,null,
+    h('div',{style:{marginBottom:12}}, h('span',{className:'integration-status int-inactive'},'Not connected')),
+    h('p',{style:{fontSize:12,color:'var(--muted)',marginBottom:12}},
+      'Get credentials from ', h('a',{href:'https://my.telegram.org',target:'_blank',style:{color:'var(--accent)'}},'my.telegram.org')),
+    step==='config' && h(F,null,
+      h('label',null,'API ID'), h('input',{type:'text',value:apiId,onChange:e=>setApiId(e.target.value)}),
+      h('label',null,'API Hash'), h('input',{type:'text',value:apiHash,onChange:e=>setApiHash(e.target.value)}),
+      err && h('div',{className:'alert alert-err'},err),
+      h('div',{style:{marginTop:14}}, h('button',{className:'btn btn-primary',onClick:doConnect,disabled:loading||!apiId||!apiHash},
+        loading?h(F,null,h('span',{className:'spinner'}),' Connecting...'):'Connect'))
+    ),
+    step==='phone' && h(F,null,
+      h('label',null,'Phone'), h('input',{type:'tel',placeholder:'+79001234567',value:phone,onChange:e=>setPhone(e.target.value)}),
+      err && h('div',{className:'alert alert-err'},err),
+      h('div',{className:'row-gap'}, h('button',{className:'btn btn-secondary btn-sm',onClick:()=>setStep('config')},'Back'),
+        h('button',{className:'btn btn-primary',onClick:doPhone,disabled:loading||!phone}, loading?'Sending...':'Send Code'))
+    ),
+    (step==='code'||step==='2fa') && h(F,null,
+      msg && h('div',{className:'alert alert-info',style:{marginBottom:12}},msg),
+      step==='code' && h(F,null, h('label',null,'Code'), h('input',{type:'text',value:code,onChange:e=>setCode(e.target.value)})),
+      h('label',null,'2FA Password'+(step==='code'?' (if enabled)':'')),
+      h('input',{type:'password',value:password,onChange:e=>setPassword(e.target.value)}),
+      err && h('div',{className:'alert alert-err'},err),
+      h('div',{className:'row-gap'}, h('button',{className:'btn btn-secondary btn-sm',onClick:()=>setStep('phone')},'Back'),
+        h('button',{className:'btn btn-primary',onClick:doCode,disabled:loading||!code}, loading?'Verifying...':'Verify'))
+    )
   );
 }
 
-// ── Chat Loader Page ─────────────────────────────────────────────────────────
-function ChatsPage({ selected, setSelected }) {
+function SlackSettings({info, onRefresh}) {
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const [botToken, setBotToken] = useState('');
+  const [showManual, setShowManual] = useState(false);
+
+  const doOAuth = async () => {
+    setLoading(true); setErr('');
+    try {
+      const r = await api.get('/api/slack/oauth/start');
+      window.location.href = r.url;
+    } catch(e) {
+      setErr(e.message);
+      setShowManual(true);
+    } setLoading(false);
+  };
+
+  const doManualConnect = async () => {
+    setLoading(true); setErr('');
+    try {
+      const r = await api.post('/api/slack/connect',{bot_token:botToken});
+      setSlackSession(r.slack_session_token);
+      onRefresh();
+    } catch(e) { setErr(e.message); } setLoading(false);
+  };
+
+  const doDisconnect = async () => {
+    try { await api.post('/api/slack/disconnect',{}); } catch(e) {}
+    setSlackSession(''); onRefresh();
+  };
+
+  if (info?.connected) {
+    return h(F,null,
+      h('div',{style:{display:'flex',alignItems:'center',gap:12,marginBottom:16}},
+        h('span',{className:'integration-status int-active'},'Active'),
+        h('span',{style:{color:'var(--text)'}},info.team||'Connected')
+      ),
+      h('button',{className:'btn btn-danger btn-sm',onClick:doDisconnect},'Disconnect')
+    );
+  }
+
+  return h(F,null,
+    h('div',{style:{marginBottom:12}}, h('span',{className:'integration-status int-inactive'},'Not connected')),
+    h('p',{style:{fontSize:12,color:'var(--muted)',marginBottom:12}},
+      'Connect your Slack workspace via OAuth or enter a Bot Token manually.'),
+    h('button',{className:'btn btn-primary',onClick:doOAuth,disabled:loading,style:{background:'var(--slack)'}},
+      loading?h(F,null,h('span',{className:'spinner'}),' Redirecting...'):'Add to Slack'),
+    err && h('div',{className:'alert alert-err'},err),
+    (showManual || !err) && h(F,null,
+      h('div',{className:'sep'}),
+      h('p',{style:{fontSize:11,color:'var(--muted)',marginBottom:8}},'Or connect manually with Bot Token:'),
+      h('label',null,'Bot Token'),
+      h('input',{type:'text',placeholder:'xoxb-...',value:botToken,onChange:e=>setBotToken(e.target.value)}),
+      h('div',{style:{marginTop:10}},
+        h('button',{className:'btn btn-secondary btn-sm',onClick:doManualConnect,disabled:loading||!botToken},'Connect with Token'))
+    )
+  );
+}
+
+// ── Unified Chats Page ──────────────────────────────────────────────────────
+function UnifiedChatsPage({selected, setSelected}) {
   const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
+  const [platformFilter, setPlatformFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState('all');
   const [lists, setLists] = useState([]);
   const [saveListName, setSaveListName] = useState('');
   const [err, setErr] = useState('');
@@ -436,509 +455,132 @@ function ChatsPage({ selected, setSelected }) {
 
   const loadChats = async () => {
     setLoading(true); setErr('');
-    try { const r = await api.get('/api/chats'); setChats(r.chats); }
-    catch(e) { setErr('Failed to load chats'); }
+    try { const r = await api.get('/api/unified/chats'); setChats(r.chats); }
+    catch(e) { setErr('Failed to load chats: '+e.message); }
     setLoading(false);
   };
 
   const loadLists = async () => {
-    const r = await api.get('/api/lists');
-    setLists(r.lists || []);
+    try { const r = await api.get('/api/unified/lists'); setLists(r.lists||[]); } catch(e) {}
   };
 
-  const toggle = (id) => {
-    setSelected(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]);
-  };
+  const toggle = (id) => setSelected(prev => prev.includes(id)?prev.filter(x=>x!==id):[...prev,id]);
 
-  const filtered = chats.filter(c => c.name.toLowerCase().includes(search.toLowerCase()));
-  const selectAll = () => setSelected(filtered.map(c=>c.id));
+  const filtered = chats.filter(c => {
+    if (search && !c.name.toLowerCase().includes(search.toLowerCase())) return false;
+    if (platformFilter!=='all' && c.platform!==platformFilter) return false;
+    if (typeFilter!=='all' && c.type!==typeFilter) return false;
+    return true;
+  });
+
+  const selectAll = () => setSelected(prev => [...new Set([...prev, ...filtered.map(c=>c.id)])]);
   const clearAll = () => setSelected([]);
 
   const doSaveList = async () => {
-    if (!saveListName || !selected.length) return;
-    await api.post('/api/lists', { name: saveListName, chat_ids: selected });
+    if (!saveListName||!selected.length) return;
+    await api.post('/api/unified/lists',{name:saveListName,chat_ids:selected});
     setSaveListName(''); setMsg('List saved!'); loadLists();
-    setTimeout(() => setMsg(''), 2500);
+    setTimeout(()=>setMsg(''),2500);
   };
 
-  const loadSavedList = (lst) => {
-    setSelected(lst.chats);
+  const loadSavedList = (lst) => setSelected(lst.chats);
+  const deleteList = async (id) => { await api.del('/api/unified/lists/'+id); loadLists(); };
+
+  const tgCount = selected.filter(id=>id.startsWith('tg:')).length;
+  const slackCount = selected.filter(id=>id.startsWith('slack:')).length;
+
+  const avatarStyle = (c) => {
+    if (c.platform==='telegram') return {background:'rgba(42,171,238,0.15)',color:'var(--tg)'};
+    return {background:'rgba(224,30,90,0.15)',color:'var(--slack)'};
   };
+  const avatarChar = (c) => c.platform==='slack'?'#':c.name.charAt(0).toUpperCase();
 
-  const deleteList = async (id) => {
-    await api.del('/api/lists/' + id); loadLists();
-  };
-
-  return (
-    <div className="main">
-      <div className="page">
-        <div className="card">
-          <div className="card-title">📂 Load Chats</div>
-          <div style={{display:'flex',gap:10}}>
-            <button className="btn btn-primary" onClick={loadChats} disabled={loading}>
-              {loading ? <><span className="spinner"/> Loading…</> : '⟳ Load My Chats'}
-            </button>
-            {chats.length > 0 && <span style={{color:'var(--muted)',alignSelf:'center',fontSize:12}}>{chats.length} chats found</span>}
-          </div>
-          {err && <div className="alert alert-err" style={{marginTop:10}}>{err}</div>}
-        </div>
-
-        {chats.length > 0 && (
-          <div className="card">
-            <div className="selected-bar">
-              <div className="card-title" style={{marginBottom:0}}>
-                Select Chats <span className="badge badge-blue" style={{marginLeft:8}}>{selected.length} selected</span>
-              </div>
-              <div style={{display:'flex',gap:8}}>
-                <button className="btn btn-secondary btn-sm" onClick={selectAll}>Select All</button>
-                <button className="btn btn-secondary btn-sm" onClick={clearAll}>Clear</button>
-              </div>
-            </div>
-            <div className="search-row">
-              <input type="text" placeholder="🔍  Search chats…" value={search} onChange={e=>setSearch(e.target.value)} />
-            </div>
-            <div className="chat-list">
-              {filtered.map(c => (
-                <div key={c.id} className={`chat-item ${selected.includes(c.id)?'selected':''}`} onClick={()=>toggle(c.id)}>
-                  <div className={`chat-avatar ${c.type}`}>{c.name.charAt(0).toUpperCase()}</div>
-                  <div className="chat-info">
-                    <div className="chat-name">{c.name}</div>
-                    <div className="chat-meta">
-                      <span className={`badge badge-${c.type==='channel'?'blue':'green'}`}>{c.type}</span>
-                      {c.members && <span style={{marginLeft:6}}>{c.members.toLocaleString()} members</span>}
-                    </div>
-                  </div>
-                  <div className="chat-check">
-                    {selected.includes(c.id) && <span style={{color:'var(--bg)',fontSize:12}}>✓</span>}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {selected.length > 0 && (
-              <div style={{marginTop:14}}>
-                <div className="sep"/>
-                <label>Save selection as list</label>
-                <div className="row-gap">
-                  <input type="text" placeholder="List name" value={saveListName} onChange={e=>setSaveListName(e.target.value)} style={{flex:1}} />
-                  <button className="btn btn-secondary btn-sm" onClick={doSaveList} disabled={!saveListName}>Save</button>
-                </div>
-                {msg && <div className="alert alert-ok" style={{marginTop:8}}>{msg}</div>}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="sidebar">
-        <div className="sidebar-title">💾 Saved Lists</div>
-        {lists.length === 0 && <p style={{color:'var(--muted)',fontSize:12}}>No saved lists yet</p>}
-        {lists.map(lst => (
-          <div key={lst.id} style={{marginBottom:10,padding:'10px',background:'var(--bg)',borderRadius:'var(--radius)',border:'1px solid var(--border)'}}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-              <span style={{fontSize:13}}>{lst.name}</span>
-              <button className="btn btn-secondary btn-sm" style={{padding:'3px 8px',fontSize:10}} onClick={()=>deleteList(lst.id)}>✕</button>
-            </div>
-            <div style={{fontSize:11,color:'var(--muted)',marginTop:4}}>{lst.chats.length} chats</div>
-            <button className="btn btn-secondary btn-sm" style={{marginTop:8,width:'100%'}} onClick={()=>loadSavedList(lst)}>→ Load</button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── Broadcast Page ───────────────────────────────────────────────────────────
-function BroadcastPage({ selected }) {
-  const [message, setMessage] = useState('');
-  const [delay, setDelay] = useState(5);
-  const [randomDelay, setRandomDelay] = useState(false);
-  const [maxPerMin, setMaxPerMin] = useState(10);
-  const [status, setStatus] = useState(null);
-  const [polling, setPolling] = useState(false);
-  const [templates, setTemplates] = useState([]);
-  const [tplName, setTplName] = useState('');
-  const [tplMsg, setTplMsg] = useState('');
-  const [tplTab, setTplTab] = useState(false);
-  const logRef = useRef(null);
-  const pollRef = useRef(null);
-
-  useEffect(() => { loadTemplates(); }, []);
-  useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [status?.log]);
-
-  const loadTemplates = async () => {
-    const r = await api.get('/api/templates'); setTemplates(r.templates || []);
-  };
-
-  const startPoll = () => {
-    setPolling(true);
-    pollRef.current = setInterval(async () => {
-      const s = await api.get('/api/broadcast/status');
-      setStatus(s);
-      if (!s.running && s.finished) { clearInterval(pollRef.current); setPolling(false); }
-    }, 800);
-  };
-
-  const doStart = async () => {
-    if (!selected.length || !message.trim()) return;
-    await api.post('/api/broadcast/start', {
-      chat_ids: selected, message, delay, random_delay: randomDelay, max_per_minute: maxPerMin
-    });
-    startPoll();
-  };
-
-  const doStop = async () => {
-    await api.post('/api/broadcast/stop', {});
-  };
-
-  const doSaveTpl = async () => {
-    if (!tplName || !tplMsg) return;
-    await api.post('/api/templates', { name: tplName, text: tplMsg });
-    setTplName(''); setTplMsg(''); loadTemplates();
-  };
-
-  const progress = status ? Math.round((status.sent + status.failed) / (status.total || 1) * 100) : 0;
-
-  return (
-    <div className="main">
-      <div className="page">
-        {selected.length === 0 && (
-          <div className="alert alert-info" style={{marginBottom:16}}>
-            ← Select chats in the Chats tab first
-          </div>
-        )}
-
-        <div className="card">
-          <div className="card-title">📨 Compose Message</div>
-          <div style={{display:'flex',gap:8,marginBottom:10}}>
-            <button className="btn btn-secondary btn-sm" onClick={()=>setTplTab(false)} style={!tplTab?{borderColor:'var(--accent)',color:'var(--accent)'}:{}}>Compose</button>
-            <button className="btn btn-secondary btn-sm" onClick={()=>setTplTab(true)} style={tplTab?{borderColor:'var(--accent)',color:'var(--accent)'}:{}}>Templates</button>
-          </div>
-
-          {!tplTab ? (
-            <>
-              <textarea placeholder="Type your broadcast message here…" value={message} onChange={e=>setMessage(e.target.value)} style={{minHeight:130}} />
-              <div style={{fontSize:11,color:'var(--muted)',marginTop:4,textAlign:'right'}}>{message.length} chars · {selected.length} chats selected</div>
-            </>
-          ) : (
-            <div>
-              <div style={{marginBottom:10}}>
-                {templates.length === 0 && <p style={{color:'var(--muted)',fontSize:12}}>No templates saved yet</p>}
-                {templates.map(t => (
-                  <div key={t.id} style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,padding:'8px 10px',background:'var(--bg)',borderRadius:'var(--radius)',border:'1px solid var(--border)'}}>
-                    <div style={{flex:1}}>
-                      <div style={{fontSize:12,color:'var(--text)'}}>{t.name}</div>
-                      <div style={{fontSize:11,color:'var(--muted)',marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:300}}>{t.text}</div>
-                    </div>
-                    <button className="btn btn-secondary btn-sm" onClick={()=>{setMessage(t.text);setTplTab(false);}}>Use</button>
-                    <button className="btn btn-sm" style={{background:'transparent',color:'var(--muted)',border:'none',padding:'4px 6px'}} onClick={()=>api.del('/api/templates/'+t.id).then(loadTemplates)}>✕</button>
-                  </div>
-                ))}
-              </div>
-              <div className="sep"/>
-              <label>New Template Name</label>
-              <input type="text" placeholder="Template name" value={tplName} onChange={e=>setTplName(e.target.value)} />
-              <label>Message Text</label>
-              <textarea placeholder="Template message…" value={tplMsg} onChange={e=>setTplMsg(e.target.value)} style={{minHeight:80}} />
-              <div style={{marginTop:10}}>
-                <button className="btn btn-secondary btn-sm" onClick={doSaveTpl} disabled={!tplName||!tplMsg}>Save Template</button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="card">
-          <div className="card-title">⚙️ Broadcast Settings</div>
-          <div className="two-col">
-            <div>
-              <label>Delay (seconds)</label>
-              <input type="number" min="1" max="600" value={delay} onChange={e=>setDelay(Number(e.target.value))} />
-            </div>
-            <div>
-              <label>Max per minute</label>
-              <input type="number" min="1" max="30" value={maxPerMin} onChange={e=>setMaxPerMin(Number(e.target.value))} />
-            </div>
-          </div>
-          <div className="toggle-row">
-            <span className="toggle-label">Random delay (+0–10s)</span>
-            <label className="toggle">
-              <input type="checkbox" checked={randomDelay} onChange={e=>setRandomDelay(e.target.checked)} />
-              <span className="toggle-slider"/>
-            </label>
-          </div>
-          {randomDelay && <div style={{fontSize:11,color:'var(--muted)',marginTop:6}}>Will wait {delay}–{delay+10}s between messages</div>}
-        </div>
-
-        <div style={{display:'flex',gap:10}}>
-          <button className="btn btn-primary" style={{flex:1,justifyContent:'center'}}
-            onClick={doStart}
-            disabled={polling || !selected.length || !message.trim()}>
-            {polling ? <><span className="spinner"/> Broadcasting…</> : `🚀 Start Broadcast (${selected.length} chats)`}
-          </button>
-          {polling && (
-            <button className="btn btn-danger" onClick={doStop}>⏹ Stop</button>
-          )}
-        </div>
-
-        {status && (
-          <div className="card" style={{marginTop:16}}>
-            <div className="card-title">📊 Progress</div>
-            {status.current_chat && (
-              <div style={{marginBottom:10,display:'flex',alignItems:'center',gap:8}}>
-                <span className="spinner"/>
-                <span className="current-tag">Sending to: {status.current_chat}</span>
-              </div>
-            )}
-            <div className="progress-bar">
-              <div className="progress-fill" style={{width: progress + '%'}} />
-            </div>
-            <div style={{textAlign:'right',fontSize:11,color:'var(--muted)',marginBottom:12}}>{progress}% ({status.sent + status.failed}/{status.total})</div>
-            <div className="stats-row">
-              <div className="stat"><div className="stat-val val-blue">{status.total}</div><div className="stat-key">Total</div></div>
-              <div className="stat"><div className="stat-val val-green">{status.sent}</div><div className="stat-key">Sent</div></div>
-              <div className="stat"><div className="stat-val val-red">{status.failed}</div><div className="stat-key">Failed</div></div>
-            </div>
-            <div className="log-box" ref={logRef}>
-              {(status.log || []).map((l,i) => <div key={i} className="log-line">{l}</div>)}
-              {!status.running && status.finished && <div className="log-line" style={{color:'var(--green)',marginTop:8}}>━━ BROADCAST COMPLETE ━━</div>}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── History Page ─────────────────────────────────────────────────────────────
-function HistoryPage() {
-  const [history, setHistory] = useState([]);
-  useEffect(() => { api.get('/api/history').then(r => setHistory(r.history || [])); }, []);
-
-  return (
-    <div className="page">
-      <div className="card">
-        <div className="card-title">📜 Broadcast History</div>
-        {history.length === 0 ? (
-          <p style={{color:'var(--muted)',fontSize:12}}>No broadcasts yet</p>
-        ) : (
-          <div style={{overflowX:'auto'}}>
-            <table>
-              <thead>
-                <tr>
-                  <th>Channel</th>
-                  <th>Message</th>
-                  <th>Sent</th>
-                  <th>Failed</th>
-                  <th>Total</th>
-                  <th>Started</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.map(h => (
-                  <tr key={h.id}>
-                    <td><span className={`badge ${h.channel_type==='slack'?'badge-slack':'badge-tg'}`}>{h.channel_type==='slack'?'Slack':'TG'}</span></td>
-                    <td style={{maxWidth:240,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{h.message}</td>
-                    <td><span className="badge badge-green">{h.sent}</span></td>
-                    <td><span className={`badge ${h.failed>0?'badge-red':'badge-green'}`}>{h.failed}</span></td>
-                    <td>{h.total}</td>
-                    <td style={{color:'var(--muted)',fontSize:11}}>{h.started_at?.slice(0,16).replace('T',' ')}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Slack Login Page ────────────────────────────────────────────────────────
-function SlackLoginPage({ onAuth }) {
-  const [botToken, setBotToken] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState('');
-  const [autoChecked, setAutoChecked] = useState(false);
-
-  useEffect(() => {
-    if (SLACK_SESSION_TOKEN && !autoChecked) {
-      setAutoChecked(true);
-      setLoading(true);
-      slackApi.get('/api/slack/me')
-        .then(me => onAuth(me))
-        .catch(() => { setSlackToken(''); })
-        .finally(() => setLoading(false));
-    } else { setAutoChecked(true); }
-  }, []);
-
-  const doConnect = async () => {
-    setLoading(true); setErr('');
-    try {
-      const r = await slackApi.post('/api/slack/connect', { bot_token: botToken });
-      setSlackToken(r.slack_session_token);
-      onAuth({ team: r.team_name, bot_user_id: r.bot_user_id });
-    } catch(e) { setErr('Connection failed: ' + e.message); }
-    setLoading(false);
-  };
-
-  if (loading) return (
-    React.createElement('div', {style:{display:'flex',alignItems:'center',justifyContent:'center',height:'60vh',gap:12}},
-      React.createElement('span', {className:'spinner'}),
-      React.createElement('span', {style:{color:'var(--muted)'}}, 'Connecting to Slack...')
-    )
-  );
-
-  return (
-    React.createElement('div', {className:'login-wrap'},
-      React.createElement('div', {className:'login-hero'},
-        React.createElement('h1', {style:{color:'#e01e5a'}}, 'Slack Broadcast'),
-        React.createElement('p', null, 'Connect your Slack Bot to start broadcasting')
+  return h('div',{className:'main'},
+    h('div',{className:'page'},
+      h('div',{className:'card'},
+        h('div',{className:'card-title'},'Load Chats'),
+        h('div',{style:{display:'flex',gap:10}},
+          h('button',{className:'btn btn-primary',onClick:loadChats,disabled:loading},
+            loading?h(F,null,h('span',{className:'spinner'}),' Loading...'):'Load All Chats'),
+          chats.length>0 && h('span',{style:{color:'var(--muted)',alignSelf:'center',fontSize:12}},chats.length+' chats')
+        ),
+        err && h('div',{className:'alert alert-err',style:{marginTop:10}},err)
       ),
-      React.createElement('div', {className:'card'},
-        React.createElement('div', {className:'card-title', style:{color:'#e01e5a'}}, 'Bot Token'),
-        React.createElement('p', {style:{fontSize:'12px',color:'var(--muted)',marginBottom:12}},
-          'Create a Slack App at ',
-          React.createElement('a', {href:'https://api.slack.com/apps', target:'_blank', style:{color:'#e01e5a'}}, 'api.slack.com/apps'),
-          ' and copy your Bot User OAuth Token (xoxb-...).',
-          React.createElement('br', null),
-          'Required scopes: channels:read, groups:read, chat:write, files:write'
+      chats.length>0 && h('div',{className:'card'},
+        h('div',{className:'selected-bar'},
+          h('div',{className:'card-title',style:{marginBottom:0}},
+            'Chats ',
+            h('span',{className:'badge badge-blue',style:{marginLeft:8}},selected.length+' selected'),
+            tgCount>0 && h('span',{className:'badge badge-tg',style:{marginLeft:4}},tgCount+' TG'),
+            slackCount>0 && h('span',{className:'badge badge-slack',style:{marginLeft:4}},slackCount+' Slack')
+          ),
+          h('div',{style:{display:'flex',gap:8}},
+            h('button',{className:'btn btn-secondary btn-sm',onClick:selectAll},'Select All'),
+            h('button',{className:'btn btn-secondary btn-sm',onClick:clearAll},'Clear'))
         ),
-        React.createElement('label', null, 'Bot Token'),
-        React.createElement('input', {type:'text', placeholder:'xoxb-...', value:botToken, onChange:e=>setBotToken(e.target.value)}),
-        err && React.createElement('div', {className:'alert alert-err'}, err),
-        React.createElement('div', {style:{marginTop:16}},
-          React.createElement('button', {className:'btn btn-primary', onClick:doConnect, disabled:loading||!botToken, style:{background:'#e01e5a'}},
-            loading ? React.createElement(React.Fragment, null, React.createElement('span', {className:'spinner'}), ' Connecting...') : 'Connect to Slack'
-          )
-        )
-      )
-    )
-  );
-}
-
-// ── Slack Chats Page ────────────────────────────────────────────────────────
-function SlackChatsPage({ selected, setSelected }) {
-  const [channels, setChannels] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [search, setSearch] = useState('');
-  const [lists, setLists] = useState([]);
-  const [saveListName, setSaveListName] = useState('');
-  const [err, setErr] = useState('');
-  const [msg, setMsg] = useState('');
-
-  useEffect(() => { loadLists(); }, []);
-
-  const loadChannels = async () => {
-    setLoading(true); setErr('');
-    try { const r = await slackApi.get('/api/slack/channels'); setChannels(r.channels); }
-    catch(e) { setErr('Failed to load channels: ' + e.message); }
-    setLoading(false);
-  };
-
-  const loadLists = async () => {
-    try { const r = await slackApi.get('/api/slack/lists'); setLists(r.lists || []); } catch(e) {}
-  };
-
-  const toggle = (id) => {
-    setSelected(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]);
-  };
-
-  const filtered = channels.filter(c => c.name.toLowerCase().includes(search.toLowerCase()));
-  const selectAll = () => setSelected(filtered.map(c=>c.id));
-  const clearAll = () => setSelected([]);
-
-  const doSaveList = async () => {
-    if (!saveListName || !selected.length) return;
-    await slackApi.post('/api/slack/lists', { name: saveListName, channel_ids: selected });
-    setSaveListName(''); setMsg('List saved!'); loadLists();
-    setTimeout(() => setMsg(''), 2500);
-  };
-
-  const loadSavedList = (lst) => { setSelected(lst.channels); };
-  const deleteList = async (id) => { await slackApi.del('/api/slack/lists/' + id); loadLists(); };
-
-  return (
-    React.createElement('div', {className:'main'},
-      React.createElement('div', {className:'page'},
-        React.createElement('div', {className:'card'},
-          React.createElement('div', {className:'card-title', style:{color:'#e01e5a'}}, 'Slack Channels'),
-          React.createElement('div', {style:{display:'flex',gap:10}},
-            React.createElement('button', {className:'btn btn-primary', onClick:loadChannels, disabled:loading, style:{background:'#e01e5a'}},
-              loading ? React.createElement(React.Fragment, null, React.createElement('span', {className:'spinner'}), ' Loading...') : 'Load Channels'
-            ),
-            channels.length > 0 && React.createElement('span', {style:{color:'var(--muted)',alignSelf:'center',fontSize:12}}, channels.length + ' channels found')
-          ),
-          err && React.createElement('div', {className:'alert alert-err', style:{marginTop:10}}, err)
+        h('div',{className:'filter-row'},
+          ['all','telegram','slack'].map(f=>
+            h('button',{key:f,className:'filter-btn'+(platformFilter===f?' active':''),onClick:()=>setPlatformFilter(f)},
+              f==='all'?'All':f==='telegram'?'Telegram':'Slack')),
+          h('span',{style:{color:'var(--border)',margin:'0 4px'}},'|'),
+          ['all','channel','group','dm'].map(f=>
+            h('button',{key:f,className:'filter-btn'+(typeFilter===f?' active':''),onClick:()=>setTypeFilter(f)},
+              f==='all'?'All Types':f.charAt(0).toUpperCase()+f.slice(1)))
         ),
-        channels.length > 0 && React.createElement('div', {className:'card'},
-          React.createElement('div', {className:'selected-bar'},
-            React.createElement('div', {className:'card-title', style:{marginBottom:0, color:'#e01e5a'}},
-              'Select Channels ',
-              React.createElement('span', {className:'badge badge-slack', style:{marginLeft:8}}, selected.length + ' selected')
-            ),
-            React.createElement('div', {style:{display:'flex',gap:8}},
-              React.createElement('button', {className:'btn btn-secondary btn-sm', onClick:selectAll}, 'Select All'),
-              React.createElement('button', {className:'btn btn-secondary btn-sm', onClick:clearAll}, 'Clear')
-            )
-          ),
-          React.createElement('div', {className:'search-row'},
-            React.createElement('input', {type:'text', placeholder:'Search channels...', value:search, onChange:e=>setSearch(e.target.value)})
-          ),
-          React.createElement('div', {className:'chat-list'},
-            filtered.map(c =>
-              React.createElement('div', {key:c.id, className:'chat-item ' + (selected.includes(c.id)?'selected':''), onClick:()=>toggle(c.id)},
-                React.createElement('div', {className:'chat-avatar', style:{background:'rgba(224,30,90,0.15)', color:'#e01e5a'}}, '#'),
-                React.createElement('div', {className:'chat-info'},
-                  React.createElement('div', {className:'chat-name'}, '#' + c.name),
-                  React.createElement('div', {className:'chat-meta'},
-                    React.createElement('span', {className:'badge badge-slack'}, c.type === 'private_channel' ? 'private' : 'public'),
-                    c.num_members > 0 && React.createElement('span', {style:{marginLeft:6}}, c.num_members + ' members'),
-                    !c.is_member && React.createElement('span', {style:{marginLeft:6, color:'var(--yellow)', fontSize:10}}, 'not joined')
-                  )
-                ),
-                React.createElement('div', {className:'chat-check'},
-                  selected.includes(c.id) && React.createElement('span', {style:{color:'var(--bg)',fontSize:12}}, '\u2713')
+        h('div',{className:'search-row'},
+          h('input',{type:'text',placeholder:'Search chats...',value:search,onChange:e=>setSearch(e.target.value)})),
+        h('div',{className:'chat-list'},
+          filtered.map(c=>
+            h('div',{key:c.id,className:'chat-item'+(selected.includes(c.id)?' selected':''),onClick:()=>toggle(c.id)},
+              h('div',{className:'chat-avatar',style:avatarStyle(c)},avatarChar(c)),
+              h('div',{className:'chat-info'},
+                h('div',{className:'chat-name'},c.name),
+                h('div',{className:'chat-meta'},
+                  h('span',{className:'badge badge-'+(c.platform==='telegram'?'tg':'slack')},c.platform==='telegram'?'TG':'Slack'),
+                  h('span',{className:'badge badge-blue',style:{marginLeft:4}},c.type),
+                  c.members>0 && h('span',{style:{marginLeft:6}},c.members+' members')
                 )
-              )
+              ),
+              h('div',{className:'chat-check'},
+                selected.includes(c.id) && h('span',{style:{color:'var(--bg)',fontSize:12}},'\u2713'))
             )
-          ),
-          selected.length > 0 && React.createElement('div', {style:{marginTop:14}},
-            React.createElement('div', {className:'sep'}),
-            React.createElement('label', null, 'Save selection as list'),
-            React.createElement('div', {className:'row-gap'},
-              React.createElement('input', {type:'text', placeholder:'List name', value:saveListName, onChange:e=>setSaveListName(e.target.value), style:{flex:1}}),
-              React.createElement('button', {className:'btn btn-secondary btn-sm', onClick:doSaveList, disabled:!saveListName}, 'Save')
-            ),
-            msg && React.createElement('div', {className:'alert alert-ok', style:{marginTop:8}}, msg)
           )
+        ),
+        selected.length>0 && h('div',{style:{marginTop:14}},
+          h('div',{className:'sep'}),
+          h('label',null,'Save selection as list'),
+          h('div',{className:'row-gap'},
+            h('input',{type:'text',placeholder:'List name',value:saveListName,onChange:e=>setSaveListName(e.target.value),style:{flex:1}}),
+            h('button',{className:'btn btn-secondary btn-sm',onClick:doSaveList,disabled:!saveListName},'Save')),
+          msg && h('div',{className:'alert alert-ok',style:{marginTop:8}},msg)
         )
-      ),
-      React.createElement('div', {className:'sidebar'},
-        React.createElement('div', {className:'sidebar-title'}, 'Saved Lists'),
-        lists.length === 0 && React.createElement('p', {style:{color:'var(--muted)',fontSize:12}}, 'No saved lists yet'),
-        lists.map(lst =>
-          React.createElement('div', {key:lst.id, style:{marginBottom:10,padding:'10px',background:'var(--bg)',borderRadius:'var(--radius)',border:'1px solid var(--border)'}},
-            React.createElement('div', {style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
-              React.createElement('span', {style:{fontSize:13}}, lst.name),
-              React.createElement('button', {className:'btn btn-secondary btn-sm', style:{padding:'3px 8px',fontSize:10}, onClick:()=>deleteList(lst.id)}, '\u2715')
-            ),
-            React.createElement('div', {style:{fontSize:11,color:'var(--muted)',marginTop:4}}, lst.channels.length + ' channels'),
-            React.createElement('button', {className:'btn btn-secondary btn-sm', style:{marginTop:8,width:'100%'}, onClick:()=>loadSavedList(lst)}, 'Load')
-          )
+      )
+    ),
+    h('div',{className:'sidebar'},
+      h('div',{className:'sidebar-title'},'Saved Lists'),
+      lists.length===0 && h('p',{style:{color:'var(--muted)',fontSize:12}},'No saved lists yet'),
+      lists.map(lst=>
+        h('div',{key:lst.id,style:{marginBottom:10,padding:10,background:'var(--bg)',borderRadius:'var(--radius)',border:'1px solid var(--border)'}},
+          h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
+            h('span',{style:{fontSize:13}},lst.name),
+            h('button',{className:'btn btn-secondary btn-sm',style:{padding:'3px 8px',fontSize:10},onClick:()=>deleteList(lst.id)},'\u2715')),
+          h('div',{style:{fontSize:11,color:'var(--muted)',marginTop:4}},
+            lst.chats.length+' chats',
+            lst.channel_type && h('span',{className:'badge badge-'+(lst.channel_type==='mixed'?'mixed':lst.channel_type==='telegram'?'tg':'slack'),style:{marginLeft:6}},lst.channel_type)),
+          h('button',{className:'btn btn-secondary btn-sm',style:{marginTop:8,width:'100%'},onClick:()=>loadSavedList(lst)},'Load')
         )
       )
     )
   );
 }
 
-// ── Slack Broadcast Page ────────────────────────────────────────────────────
-function SlackBroadcastPage({ selected }) {
+// ── Unified Broadcast Page ──────────────────────────────────────────────────
+function UnifiedBroadcastPage({selected}) {
   const [message, setMessage] = useState('');
-  const [delay, setDelay] = useState(1);
+  const [delay, setDelay] = useState(3);
   const [randomDelay, setRandomDelay] = useState(false);
-  const [maxPerMin, setMaxPerMin] = useState(30);
+  const [maxPerMin, setMaxPerMin] = useState(15);
+  const [broadcastId, setBroadcastId] = useState(null);
   const [status, setStatus] = useState(null);
   const [polling, setPolling] = useState(false);
   const [templates, setTemplates] = useState([]);
@@ -949,267 +591,238 @@ function SlackBroadcastPage({ selected }) {
   const pollRef = useRef(null);
 
   useEffect(() => { loadTemplates(); }, []);
-  useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [status]);
+  useEffect(() => { if(logRef.current) logRef.current.scrollTop=logRef.current.scrollHeight; }, [status]);
 
   const loadTemplates = async () => {
-    try { const r = await api.get('/api/templates'); setTemplates(r.templates || []); } catch(e) {}
+    try { const r = await api.get('/api/templates'); setTemplates(r.templates||[]); } catch(e) {}
   };
 
-  const startPoll = () => {
+  const startPoll = (bid) => {
     setPolling(true);
     pollRef.current = setInterval(async () => {
       try {
-        const s = await slackApi.get('/api/slack/broadcast/status');
+        const s = await api.get('/api/unified/broadcast/status?broadcast_id='+bid);
         setStatus(s);
-        if (!s.running && s.finished) { clearInterval(pollRef.current); setPolling(false); }
-      } catch(e) {}
+        if(!s.running&&s.finished) { clearInterval(pollRef.current); setPolling(false); }
+      } catch(e){}
     }, 800);
   };
 
   const doStart = async () => {
-    if (!selected.length || !message.trim()) return;
-    await slackApi.post('/api/slack/broadcast/start', {
-      channel_ids: selected, message, delay, random_delay: randomDelay, max_per_minute: maxPerMin
+    if(!selected.length||!message.trim()) return;
+    const r = await api.post('/api/unified/broadcast/start',{
+      chat_ids:selected, message, delay, random_delay:randomDelay, max_per_minute:maxPerMin
     });
-    startPoll();
+    setBroadcastId(r.broadcast_id);
+    startPoll(r.broadcast_id);
   };
 
-  const doStop = async () => { await slackApi.post('/api/slack/broadcast/stop', {}); };
+  const doStop = async () => {
+    if(broadcastId) await api.post('/api/unified/broadcast/stop?broadcast_id='+broadcastId,{});
+  };
 
   const doSaveTpl = async () => {
-    if (!tplName || !tplMsg) return;
-    await api.post('/api/templates', { name: tplName, text: tplMsg });
+    if(!tplName||!tplMsg) return;
+    await api.post('/api/templates',{name:tplName,text:tplMsg});
     setTplName(''); setTplMsg(''); loadTemplates();
   };
 
-  const progress = status ? Math.round((status.sent + status.failed) / (status.total || 1) * 100) : 0;
+  const progress = status?Math.round((status.sent+status.failed)/(status.total||1)*100):0;
+  const tgCount = selected.filter(id=>id.startsWith('tg:')).length;
+  const slackCount = selected.filter(id=>id.startsWith('slack:')).length;
 
-  return React.createElement('div', {className:'main'},
-    React.createElement('div', {className:'page'},
-      selected.length === 0 && React.createElement('div', {className:'alert alert-info', style:{marginBottom:16}},
-        'Select channels in the Channels tab first'
-      ),
-      React.createElement('div', {className:'card'},
-        React.createElement('div', {className:'card-title', style:{color:'#e01e5a'}}, 'Compose Message'),
-        React.createElement('div', {style:{display:'flex',gap:8,marginBottom:10}},
-          React.createElement('button', {className:'btn btn-secondary btn-sm', onClick:()=>setTplTab(false), style:!tplTab?{borderColor:'#e01e5a',color:'#e01e5a'}:{}}, 'Compose'),
-          React.createElement('button', {className:'btn btn-secondary btn-sm', onClick:()=>setTplTab(true), style:tplTab?{borderColor:'#e01e5a',color:'#e01e5a'}:{}}, 'Templates')
+  return h('div',{className:'main'},
+    h('div',{className:'page'},
+      selected.length===0 && h('div',{className:'alert alert-info',style:{marginBottom:16}},'Select chats in the Chats tab first'),
+
+      h('div',{className:'card'},
+        h('div',{className:'card-title'},'Compose Message'),
+        h('div',{style:{display:'flex',gap:8,marginBottom:10}},
+          h('button',{className:'btn btn-secondary btn-sm',onClick:()=>setTplTab(false),style:!tplTab?{borderColor:'var(--accent)',color:'var(--accent)'}:{}},'Compose'),
+          h('button',{className:'btn btn-secondary btn-sm',onClick:()=>setTplTab(true),style:tplTab?{borderColor:'var(--accent)',color:'var(--accent)'}:{}},'Templates')
         ),
-        !tplTab ? React.createElement(React.Fragment, null,
-          React.createElement('textarea', {placeholder:'Type your broadcast message here...', value:message, onChange:e=>setMessage(e.target.value), style:{minHeight:130}}),
-          React.createElement('div', {style:{fontSize:11,color:'var(--muted)',marginTop:4,textAlign:'right'}}, message.length + ' chars \u00b7 ' + selected.length + ' channels selected')
-        ) : React.createElement('div', null,
-          React.createElement('div', {style:{marginBottom:10}},
-            templates.length === 0 && React.createElement('p', {style:{color:'var(--muted)',fontSize:12}}, 'No templates saved yet'),
-            templates.map(t =>
-              React.createElement('div', {key:t.id, style:{display:'flex',alignItems:'center',gap:8,marginBottom:8,padding:'8px 10px',background:'var(--bg)',borderRadius:'var(--radius)',border:'1px solid var(--border)'}},
-                React.createElement('div', {style:{flex:1}},
-                  React.createElement('div', {style:{fontSize:12,color:'var(--text)'}}, t.name),
-                  React.createElement('div', {style:{fontSize:11,color:'var(--muted)',marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:300}}, t.text)
-                ),
-                React.createElement('button', {className:'btn btn-secondary btn-sm', onClick:()=>{setMessage(t.text);setTplTab(false);}}, 'Use'),
-                React.createElement('button', {className:'btn btn-sm', style:{background:'transparent',color:'var(--muted)',border:'none',padding:'4px 6px'}, onClick:()=>api.del('/api/templates/'+t.id).then(loadTemplates)}, '\u2715')
-              )
-            )
-          ),
-          React.createElement('div', {className:'sep'}),
-          React.createElement('label', null, 'New Template Name'),
-          React.createElement('input', {type:'text', placeholder:'Template name', value:tplName, onChange:e=>setTplName(e.target.value)}),
-          React.createElement('label', null, 'Message Text'),
-          React.createElement('textarea', {placeholder:'Template message...', value:tplMsg, onChange:e=>setTplMsg(e.target.value), style:{minHeight:80}}),
-          React.createElement('div', {style:{marginTop:10}},
-            React.createElement('button', {className:'btn btn-secondary btn-sm', onClick:doSaveTpl, disabled:!tplName||!tplMsg}, 'Save Template')
-          )
+        !tplTab ? h(F,null,
+          h('textarea',{placeholder:'Type your broadcast message...',value:message,onChange:e=>setMessage(e.target.value),style:{minHeight:130}}),
+          h('div',{style:{fontSize:11,color:'var(--muted)',marginTop:4,textAlign:'right'}},
+            message.length+' chars \u00b7 '+selected.length+' chats',
+            tgCount>0&&' ('+tgCount+' TG',
+            slackCount>0&&(tgCount>0?' + ':' (')+slackCount+' Slack',
+            (tgCount>0||slackCount>0)&&')')
+        ) : h('div',null,
+          h('div',{style:{marginBottom:10}},
+            templates.length===0 && h('p',{style:{color:'var(--muted)',fontSize:12}},'No templates yet'),
+            templates.map(t=>
+              h('div',{key:t.id,style:{display:'flex',alignItems:'center',gap:8,marginBottom:8,padding:'8px 10px',background:'var(--bg)',borderRadius:'var(--radius)',border:'1px solid var(--border)'}},
+                h('div',{style:{flex:1}},
+                  h('div',{style:{fontSize:12}},t.name),
+                  h('div',{style:{fontSize:11,color:'var(--muted)',marginTop:2,maxWidth:300,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},t.text)),
+                h('button',{className:'btn btn-secondary btn-sm',onClick:()=>{setMessage(t.text);setTplTab(false);}},'Use'),
+                h('button',{className:'btn btn-sm',style:{background:'transparent',color:'var(--muted)',border:'none'},onClick:()=>api.del('/api/templates/'+t.id).then(loadTemplates)},'\u2715')))),
+          h('div',{className:'sep'}),
+          h('label',null,'Template Name'), h('input',{type:'text',value:tplName,onChange:e=>setTplName(e.target.value)}),
+          h('label',null,'Message'), h('textarea',{value:tplMsg,onChange:e=>setTplMsg(e.target.value),style:{minHeight:80}}),
+          h('div',{style:{marginTop:10}}, h('button',{className:'btn btn-secondary btn-sm',onClick:doSaveTpl,disabled:!tplName||!tplMsg},'Save Template'))
         )
       ),
-      React.createElement('div', {className:'card'},
-        React.createElement('div', {className:'card-title', style:{color:'#e01e5a'}}, 'Broadcast Settings'),
-        React.createElement('div', {className:'two-col'},
-          React.createElement('div', null,
-            React.createElement('label', null, 'Delay (seconds)'),
-            React.createElement('input', {type:'number', min:'1', max:'60', value:delay, onChange:e=>setDelay(Number(e.target.value))})
-          ),
-          React.createElement('div', null,
-            React.createElement('label', null, 'Max per minute'),
-            React.createElement('input', {type:'number', min:'1', max:'60', value:maxPerMin, onChange:e=>setMaxPerMin(Number(e.target.value))})
-          )
+
+      h('div',{className:'card'},
+        h('div',{className:'card-title'},'Settings'),
+        h('div',{className:'two-col'},
+          h('div',null, h('label',null,'Delay (s)'), h('input',{type:'number',min:1,max:60,value:delay,onChange:e=>setDelay(Number(e.target.value))})),
+          h('div',null, h('label',null,'Max per minute'), h('input',{type:'number',min:1,max:60,value:maxPerMin,onChange:e=>setMaxPerMin(Number(e.target.value))}))
         ),
-        React.createElement('div', {className:'toggle-row'},
-          React.createElement('span', {className:'toggle-label'}, 'Random delay (+0\u20133s)'),
-          React.createElement('label', {className:'toggle'},
-            React.createElement('input', {type:'checkbox', checked:randomDelay, onChange:e=>setRandomDelay(e.target.checked)}),
-            React.createElement('span', {className:'toggle-slider'})
-          )
-        )
+        h('div',{className:'toggle-row'},
+          h('span',{className:'toggle-label'},'Random delay (+0\u20133s)'),
+          h('label',{className:'toggle'},
+            h('input',{type:'checkbox',checked:randomDelay,onChange:e=>setRandomDelay(e.target.checked)}),
+            h('span',{className:'toggle-slider'})))
       ),
-      React.createElement('div', {style:{display:'flex',gap:10}},
-        React.createElement('button', {className:'btn btn-primary', style:{flex:1,justifyContent:'center',background:'#e01e5a'}, onClick:doStart, disabled:polling||!selected.length||!message.trim()},
-          polling ? React.createElement(React.Fragment, null, React.createElement('span', {className:'spinner'}), ' Broadcasting...') : 'Start Broadcast (' + selected.length + ' channels)'
-        ),
-        polling && React.createElement('button', {className:'btn btn-danger', onClick:doStop}, 'Stop')
+
+      h('div',{style:{display:'flex',gap:10}},
+        h('button',{className:'btn btn-primary',style:{flex:1,justifyContent:'center'},onClick:doStart,disabled:polling||!selected.length||!message.trim()},
+          polling?h(F,null,h('span',{className:'spinner'}),' Broadcasting...'):'Start Broadcast ('+selected.length+' chats)'),
+        polling && h('button',{className:'btn btn-danger',onClick:doStop},'Stop')
       ),
-      status && React.createElement('div', {className:'card', style:{marginTop:16}},
-        React.createElement('div', {className:'card-title', style:{color:'#e01e5a'}}, 'Progress'),
-        status.current_chat && React.createElement('div', {style:{marginBottom:10,display:'flex',alignItems:'center',gap:8}},
-          React.createElement('span', {className:'spinner'}),
-          React.createElement('span', {className:'current-tag'}, 'Sending to: #' + status.current_chat)
+
+      status && h('div',{className:'card',style:{marginTop:16}},
+        h('div',{className:'card-title'},'Progress'),
+        status.current_chat && h('div',{style:{marginBottom:10,display:'flex',alignItems:'center',gap:8}},
+          h('span',{className:'spinner'}), h('span',{className:'current-tag'},'Sending to: '+status.current_chat)),
+        h('div',{className:'progress-bar'}, h('div',{className:'progress-fill',style:{width:progress+'%'}})),
+        h('div',{style:{textAlign:'right',fontSize:11,color:'var(--muted)',marginBottom:12}},progress+'% ('+(status.sent+status.failed)+'/'+status.total+')'),
+        h('div',{className:'stats-row'},
+          h('div',{className:'stat'},h('div',{className:'stat-val val-blue'},status.total),h('div',{className:'stat-key'},'Total')),
+          h('div',{className:'stat'},h('div',{className:'stat-val val-green'},status.sent),h('div',{className:'stat-key'},'Sent')),
+          h('div',{className:'stat'},h('div',{className:'stat-val val-red'},status.failed),h('div',{className:'stat-key'},'Failed'))
         ),
-        React.createElement('div', {className:'progress-bar'},
-          React.createElement('div', {className:'progress-fill', style:{width:progress+'%', background:'#e01e5a'}})
-        ),
-        React.createElement('div', {style:{textAlign:'right',fontSize:11,color:'var(--muted)',marginBottom:12}}, progress + '% (' + (status.sent+status.failed) + '/' + status.total + ')'),
-        React.createElement('div', {className:'stats-row'},
-          React.createElement('div', {className:'stat'}, React.createElement('div', {className:'stat-val val-blue'}, status.total), React.createElement('div', {className:'stat-key'}, 'Total')),
-          React.createElement('div', {className:'stat'}, React.createElement('div', {className:'stat-val val-green'}, status.sent), React.createElement('div', {className:'stat-key'}, 'Sent')),
-          React.createElement('div', {className:'stat'}, React.createElement('div', {className:'stat-val val-red'}, status.failed), React.createElement('div', {className:'stat-key'}, 'Failed'))
-        ),
-        React.createElement('div', {className:'log-box', ref:logRef},
-          (status.log || []).map((l,i) => React.createElement('div', {key:i, className:'log-line'}, l)),
-          !status.running && status.finished && React.createElement('div', {className:'log-line', style:{color:'var(--green)',marginTop:8}}, '\u2501\u2501 BROADCAST COMPLETE \u2501\u2501')
+        h('div',{className:'log-box',ref:logRef},
+          (status.log||[]).map((l,i)=>h('div',{key:i,className:'log-line'},l)),
+          !status.running&&status.finished&&h('div',{className:'log-line',style:{color:'var(--green)',marginTop:8}},'\u2501\u2501 BROADCAST COMPLETE \u2501\u2501'))
+      )
+    )
+  );
+}
+
+// ── History Page ────────────────────────────────────────────────────────────
+function HistoryPage() {
+  const [history, setHistory] = useState([]);
+  useEffect(() => { api.get('/api/history').then(r=>setHistory(r.history||[])).catch(()=>{}); }, []);
+
+  const typeBadge = (t) => {
+    if(t==='mixed') return h('span',{className:'badge badge-mixed'},'Mixed');
+    if(t==='slack') return h('span',{className:'badge badge-slack'},'Slack');
+    return h('span',{className:'badge badge-tg'},'TG');
+  };
+
+  return h('div',{className:'page'},
+    h('div',{className:'card'},
+      h('div',{className:'card-title'},'Broadcast History'),
+      history.length===0 ? h('p',{style:{color:'var(--muted)',fontSize:12}},'No broadcasts yet') :
+      h('div',{style:{overflowX:'auto'}},
+        h('table',null,
+          h('thead',null,h('tr',null,
+            h('th',null,'Channel'), h('th',null,'Message'), h('th',null,'Sent'), h('th',null,'Failed'), h('th',null,'Total'), h('th',null,'Started'))),
+          h('tbody',null,
+            history.map(hh=>h('tr',{key:hh.id},
+              h('td',null,typeBadge(hh.channel_type)),
+              h('td',{style:{maxWidth:200,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}},hh.message),
+              h('td',null,h('span',{className:'badge badge-green'},hh.sent)),
+              h('td',null,h('span',{className:'badge '+(hh.failed>0?'badge-red':'badge-green')},hh.failed)),
+              h('td',null,hh.total),
+              h('td',{style:{color:'var(--muted)',fontSize:11}},hh.started_at?.slice(0,16).replace('T',' '))
+            ))
+          )
         )
       )
     )
   );
 }
 
-// ── App ──────────────────────────────────────────────────────────────────────
+// ── App ─────────────────────────────────────────────────────────────────────
 function App() {
-  const [user, setUser] = useState(null);
-  const [tab, setTab] = useState('chats');
+  const [appUser, setAppUser] = useState(null);
+  const [tab, setTab] = useState('broadcast');
   const [selected, setSelected] = useState([]);
-  const [checkingAuth, setCheckingAuth] = useState(false);
-  const [showSettings, setShowSettings] = useState(!sessionStorage.getItem('api_base'));
+  const [integrations, setIntegrations] = useState(null);
+  const [showSetup, setShowSetup] = useState(!sessionStorage.getItem('api_base'));
+  const [checking, setChecking] = useState(true);
 
-  // Platform & Slack state
-  const [platform, setPlatform] = useState('telegram');
-  const [slackUser, setSlackUser] = useState(null);
-  const [slackSelected, setSlackSelected] = useState([]);
-
-  const tryAutoLogin = useCallback(() => {
-    setCheckingAuth(true);
-    fetch(API_BASE + '/api/me')
-      .then(r => r.ok ? r.json() : null)
-      .then(me => { if (me && me.name) setUser(me); })
-      .catch(() => {})
-      .finally(() => setCheckingAuth(false));
+  const loadIntegrations = useCallback(async () => {
+    try { const r = await api.get('/api/integrations/status'); setIntegrations(r);
+      if(r.telegram?.session_token) setTgSession(r.telegram.session_token);
+      if(r.slack?.session_token) setSlackSession(r.slack.session_token);
+    } catch(e){}
   }, []);
 
-  const handleSettingsSave = () => {
-    setShowSettings(false);
-    tryAutoLogin();
-  };
-
+  // Handle Slack OAuth callback
   useEffect(() => {
-    if (!showSettings) tryAutoLogin();
+    const params = new URLSearchParams(window.location.search);
+    const slackToken = params.get('slack_connected');
+    if(slackToken) { setSlackSession(slackToken); window.history.replaceState({},'','/'); }
   }, []);
 
-  const doLogout = async () => {
-    await api.post('/api/logout', {});
-    setUser(null); setSelected([]);
-  };
+  // Auto-login with stored JWT
+  useEffect(() => {
+    if(showSetup) { setChecking(false); return; }
+    if(!JWT_TOKEN) { setChecking(false); return; }
+    api.get('/api/auth/me').then(u => {
+      setAppUser({username:u.username,role:u.role,id:u.id});
+      loadIntegrations();
+    }).catch(() => { setJwt(''); }).finally(() => setChecking(false));
+  }, [showSetup]);
 
-  const doSlackLogout = async () => {
-    try { await slackApi.post('/api/slack/disconnect', {}); } catch(e) {}
-    setSlackToken('');
-    setSlackUser(null); setSlackSelected([]);
-  };
+  const handleSetup = () => { setShowSetup(false); setChecking(false); };
+  const handleLogin = (u) => { setAppUser(u); loadIntegrations(); };
+  const handleLogout = () => { setJwt(''); setTgSession(''); setSlackSession(''); setAppUser(null); setSelected([]); setIntegrations(null); };
 
-  const switchPlatform = (p) => {
-    setPlatform(p);
-    setTab('chats');
-  };
+  if(showSetup) return h(SettingsScreen,{onSave:handleSetup});
+  if(checking) return h('div',{style:{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',gap:12}},
+    h('span',{className:'spinner'}), h('span',{style:{color:'var(--muted)'}},'Loading...'));
+  if(!appUser) return h(F,null,
+    h('div',{style:{position:'fixed',top:16,right:16,zIndex:200}},
+      h('button',{className:'btn btn-secondary btn-sm',onClick:()=>setShowSetup(true)},'Settings')),
+    h(AppLoginPage,{onAuth:handleLogin}));
 
-  if (showSettings) return <SettingsScreen onSave={handleSettingsSave} />;
+  const tgOk = integrations?.telegram?.connected;
+  const slackOk = integrations?.slack?.connected;
 
-  if (checkingAuth) return (
-    <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',gap:12}}>
-      <span className="spinner"/> <span style={{color:'var(--muted)'}}>Подключение…</span>
-    </div>
-  );
-
-  // Telegram not logged in and platform is telegram
-  if (!user && platform === 'telegram') return (
-    <>
-      <div style={{position:'fixed',top:16,right:16,zIndex:200}}>
-        <div className="platform-switch">
-          <button className={'platform-btn active-tg'} onClick={()=>switchPlatform('telegram')}>Telegram</button>
-          <button className={'platform-btn'} onClick={()=>switchPlatform('slack')}>Slack</button>
-        </div>
-      </div>
-      <LoginPage onAuth={setUser} />
-    </>
-  );
-
-  // Slack not logged in and platform is slack
-  if (!slackUser && platform === 'slack') return (
-    <>
-      <div style={{position:'fixed',top:16,right:16,zIndex:200}}>
-        <div className="platform-switch">
-          <button className={'platform-btn'} onClick={()=>switchPlatform('telegram')}>Telegram</button>
-          <button className={'platform-btn active-slack'} onClick={()=>switchPlatform('slack')}>Slack</button>
-        </div>
-      </div>
-      <SlackLoginPage onAuth={setSlackUser} />
-    </>
-  );
-
-  const isTg = platform === 'telegram';
-  const curSelected = isTg ? selected : slackSelected;
-  const accentColor = isTg ? 'var(--accent)' : '#e01e5a';
-
-  return (
-    <>
-      <div className="header">
-        <div className="header-logo">
-          <div className="logo-icon" style={!isTg?{background:'#e01e5a'}:{}}>{isTg ? '📡' : '💬'}</div>
-          <div>
-            <div className="logo-text" style={{color:accentColor}}>{isTg ? 'TG Broadcast' : 'Slack Broadcast'}</div>
-            <div className="logo-sub">{isTg ? 'Telethon User Client' : (slackUser?.team || 'Slack Bot')}</div>
-          </div>
-        </div>
-        <div className="header-user">
-          <div className="platform-switch" style={{marginRight:12}}>
-            <button className={'platform-btn' + (isTg?' active-tg':'')} onClick={()=>switchPlatform('telegram')}>Telegram</button>
-            <button className={'platform-btn' + (!isTg?' active-slack':'')} onClick={()=>switchPlatform('slack')}>Slack</button>
-          </div>
-          <div className="status-dot" style={!isTg?{background:'#e01e5a',boxShadow:'0 0 6px #e01e5a'}:{}}/>
-          <span>{isTg ? (user?.name || user?.username || '') : (slackUser?.team || slackUser?.user || 'Slack')}</span>
-          <span style={{color:'var(--border)'}}>·</span>
-          <button className="btn btn-secondary btn-sm" onClick={()=>setShowSettings(true)} style={{marginRight:4}}>⚙️</button>
-          <button className="btn btn-secondary btn-sm" onClick={isTg ? doLogout : doSlackLogout}>Выйти</button>
-        </div>
-      </div>
-      <div className="nav">
-        {isTg ? (
-          [['chats','📂 Чаты'], ['broadcast','🚀 Рассылка'+(selected.length?` (${selected.length})`:'')], ['history','📜 История']].map(([k,l]) => (
-            <button key={k} className={`nav-btn ${tab===k?'active':''}`} onClick={()=>setTab(k)}>{l}</button>
-          ))
-        ) : (
-          [['chats','💬 Каналы'], ['broadcast','🚀 Рассылка'+(slackSelected.length?` (${slackSelected.length})`:'')], ['history','📜 История']].map(([k,l]) => (
-            <button key={k} className={`nav-btn ${tab===k?'active':''}`} onClick={()=>setTab(k)} style={tab===k?{color:'#e01e5a',borderBottomColor:'#e01e5a'}:{}}>{l}</button>
-          ))
-        )}
-      </div>
-      <div style={{flex:1,overflow:'auto'}}>
-        {isTg ? (
-          <>
-            {tab === 'chats' && <ChatsPage selected={selected} setSelected={setSelected} />}
-            {tab === 'broadcast' && <BroadcastPage selected={selected} />}
-            {tab === 'history' && <HistoryPage />}
-          </>
-        ) : (
-          <>
-            {tab === 'chats' && <SlackChatsPage selected={slackSelected} setSelected={setSlackSelected} />}
-            {tab === 'broadcast' && <SlackBroadcastPage selected={slackSelected} />}
-            {tab === 'history' && <HistoryPage />}
-          </>
-        )}
-      </div>
-    </>
+  return h(F,null,
+    h('div',{className:'header'},
+      h('div',{className:'header-logo'},
+        h('div',{className:'logo-icon'},'B'),
+        h('div',null,
+          h('div',{className:'logo-text'},'Broadcast Service'),
+          h('div',{className:'logo-sub'},
+            (tgOk?'TG ':'')+(tgOk&&slackOk?' + ':'')+(slackOk?'Slack ':'')+(!tgOk&&!slackOk?'No integrations':''))
+        )
+      ),
+      h('div',{className:'header-user'},
+        tgOk && h('span',{className:'badge badge-tg',style:{marginRight:4}},'TG'),
+        slackOk && h('span',{className:'badge badge-slack',style:{marginRight:4}},'Slack'),
+        h('div',{className:'status-dot'}),
+        h('span',null,appUser.username),
+        h('button',{className:'btn btn-secondary btn-sm',onClick:()=>setShowSetup(true),style:{marginLeft:8}},'Backend'),
+        h('button',{className:'btn btn-secondary btn-sm',onClick:handleLogout},'Logout')
+      )
+    ),
+    h('div',{className:'nav'},
+      [['broadcast','Broadcast'+(selected.length?' ('+selected.length+')':'')],
+       ['chats','Chats'],
+       ['history','History'],
+       ['settings','Settings']].map(([k,l])=>
+        h('button',{key:k,className:'nav-btn'+(tab===k?' active':''),onClick:()=>setTab(k)},l)
+      )
+    ),
+    h('div',{style:{flex:1,overflow:'auto'}},
+      tab==='broadcast' && h(UnifiedBroadcastPage,{selected}),
+      tab==='chats' && h(UnifiedChatsPage,{selected,setSelected}),
+      tab==='history' && h(HistoryPage,null),
+      tab==='settings' && h(SettingsPage,{integrations,onRefresh:loadIntegrations})
+    )
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+ReactDOM.createRoot(document.getElementById('root')).render(h(App));
 </script>
 </body>
 </html>
