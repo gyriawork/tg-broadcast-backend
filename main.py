@@ -90,16 +90,21 @@ def init_db():
         created_at TEXT   NOT NULL,
         created_by INTEGER
     )""")
-    # Seed default superadmin if table empty
+    # Seed default superadmin if table empty, or reset password if ADMIN_PASSWORD env is set
     row = c.execute("SELECT COUNT(*) FROM app_users").fetchone()
+    default_pw = os.environ.get("ADMIN_PASSWORD", "admin123")
     if row[0] == 0:
-        default_pw = os.environ.get("ADMIN_PASSWORD", "admin123")
         hashed = hash_password(default_pw)
         c.execute(
             "INSERT INTO app_users (username, password_hash, role, created_at) VALUES (?,?,?,?)",
             ("admin", hashed, "superadmin", datetime.utcnow().isoformat())
         )
         logger.info(f"Created default superadmin — password: {default_pw}")
+    elif os.environ.get("ADMIN_PASSWORD"):
+        # Reset admin password if ADMIN_PASSWORD env var is explicitly set
+        hashed = hash_password(default_pw)
+        c.execute("UPDATE app_users SET password_hash=? WHERE username='admin'", (hashed,))
+        logger.info("Reset admin password from ADMIN_PASSWORD env var")
     # ── chat lists ──
     c.execute("""CREATE TABLE IF NOT EXISTS chat_lists (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
