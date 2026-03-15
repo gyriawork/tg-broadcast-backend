@@ -180,6 +180,26 @@ def init_db():
         created_at TEXT    NOT NULL,
         created_by INTEGER
     )""")
+    # ── accounts registry ──
+    c.execute("""CREATE TABLE IF NOT EXISTS accounts (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        name             TEXT    NOT NULL,
+        messenger        TEXT    NOT NULL,
+        external_channel TEXT    NOT NULL,
+        type             TEXT    NOT NULL,
+        owner_id         INTEGER,
+        created_at       TEXT    NOT NULL,
+        UNIQUE(messenger, external_channel)
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS account_tags (
+        id   INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT    NOT NULL UNIQUE
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS account_tag_links (
+        account_id INTEGER NOT NULL,
+        tag_id     INTEGER NOT NULL,
+        PRIMARY KEY (account_id, tag_id)
+    )""")
     # ── multi-tenant migrations ──
     user_cols = {row[1] for row in c.execute("PRAGMA table_info(app_users)")}
     if "company_id" not in user_cols:
@@ -387,6 +407,22 @@ def get_slack_client(token: str) -> WebClient:
     if not c:
         raise HTTPException(status_code=400, detail="No Slack session. Connect first.")
     return c
+
+# ── Accounts sync helper ─────────────────────────────────────────────────────
+def sync_accounts_from_chats(chats: list, messenger: str):
+    """Upsert chats into the accounts registry. Preserves owner_id and created_at."""
+    conn = sqlite3.connect(DB_PATH)
+    now = datetime.utcnow().isoformat()
+    for ch in chats:
+        conn.execute("""
+            INSERT INTO accounts (name, messenger, external_channel, type, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(messenger, external_channel) DO UPDATE SET
+                name = excluded.name,
+                type = excluded.type
+        """, (ch["name"], messenger, str(ch["external_channel"]), ch["type"], now))
+    conn.commit()
+    conn.close()
 
 # ═════════════════════════════════════════════════════════════════════════════
 # ── RBAC: App auth endpoints ──────────────────────────────────────────────────
@@ -698,6 +734,11 @@ async def get_chats(token: str = Depends(get_tg_session_token),
         if os.path.exists(session_path):
             os.remove(session_path)
         raise HTTPException(status_code=401, detail="Session expired — please reconnect your Telegram account")
+    sync_accounts_from_chats([
+        {"external_channel": str(ch["id"]), "name": ch["name"],
+         "type": "dm" if ch["type"] == "user" else ch["type"]}
+        for ch in chats
+    ], messenger="telegram")
     return {"chats": chats}
 
 # ── File upload ───────────────────────────────────────────────────────────────
@@ -1289,6 +1330,11 @@ async def slack_channels(token: str = Depends(get_slack_session_token),
                 break
     except SlackApiError as e:
         raise HTTPException(status_code=400, detail=f"Slack error: {e.response['error']}")
+    sync_accounts_from_chats([
+        {"external_channel": ch["id"], "name": ch["name"],
+         "type": "channel" if ch["type"] == "public_channel" else "group"}
+        for ch in channels
+    ], messenger="slack")
     return {"channels": channels}
 
 # ── Slack: broadcast ─────────────────────────────────────────────────────────
@@ -1686,6 +1732,15 @@ async def get_unified_chats(app_user: dict = Depends(get_current_app_user)):
         except Exception as e:
             logger.warning(f"Failed to load Slack channels for token {s_token[:8]}: {e}")
 
+    tg_sync = [{"external_channel": str(c["raw_id"]), "name": c["name"], "type": c["type"]}
+               for c in chats if c["platform"] == "telegram"]
+    slack_sync = [{"external_channel": str(c["raw_id"]), "name": c["name"], "type": c["type"]}
+                  for c in chats if c["platform"] == "slack"]
+    if tg_sync:
+        sync_accounts_from_chats(tg_sync, messenger="telegram")
+    if slack_sync:
+        sync_accounts_from_chats(slack_sync, messenger="slack")
+
     return {"chats": chats}
 
 # ── Unified broadcast ────────────────────────────────────────────────────────
@@ -1969,6 +2024,225 @@ def delete_unified_list(list_id: int, app_user: dict = Depends(get_current_app_u
     conn.commit()
     conn.close()
     return {"deleted": True}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# ── Accounts & Dashboard ────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+
+class BulkAssignOwnerRequest(BaseModel):
+    account_ids: list
+    owner_id: Optional[int] = None
+
+class BulkAddTagsRequest(BaseModel):
+    account_ids: list
+    tag_ids: list
+
+class BulkRemoveTagsRequest(BaseModel):
+    account_ids: list
+    tag_ids: list
+
+class CreateTagRequest(BaseModel):
+    name: str
+
+
+@app.get("/api/accounts")
+def list_accounts(
+    messenger: Optional[str] = Query(None),
+    owner_id: Optional[str] = Query(None),
+    type: Optional[str] = Query(None),
+    tags: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+    app_user: dict = Depends(get_current_app_user),
+):
+    conn = sqlite3.connect(DB_PATH)
+    conditions = []
+    params = []
+
+    if messenger:
+        conditions.append("a.messenger = ?")
+        params.append(messenger)
+    if type:
+        conditions.append("a.type = ?")
+        params.append(type)
+    if owner_id is not None:
+        if owner_id == "unassigned":
+            conditions.append("a.owner_id IS NULL")
+        else:
+            conditions.append("a.owner_id = ?")
+            params.append(int(owner_id))
+    if search:
+        conditions.append("a.name LIKE ?")
+        params.append(f"%{search}%")
+
+    tag_join = ""
+    if tags:
+        tag_id_list = [int(t) for t in tags.split(",") if t.strip()]
+        if tag_id_list:
+            placeholders = ",".join("?" * len(tag_id_list))
+            tag_join = f" JOIN account_tag_links atl ON a.id = atl.account_id AND atl.tag_id IN ({placeholders})"
+            params = list(tag_id_list) + params
+
+    where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+
+    count_sql = f"SELECT COUNT(DISTINCT a.id) FROM accounts a{tag_join}{where}"
+    total = conn.execute(count_sql, params).fetchone()[0]
+
+    offset = (page - 1) * per_page
+    data_sql = (
+        f"SELECT DISTINCT a.id, a.name, a.messenger, a.external_channel, a.type, "
+        f"a.owner_id, u.username AS owner_name, a.created_at "
+        f"FROM accounts a{tag_join} LEFT JOIN app_users u ON a.owner_id = u.id"
+        f"{where} ORDER BY a.id DESC LIMIT ? OFFSET ?"
+    )
+    rows = conn.execute(data_sql, params + [per_page, offset]).fetchall()
+
+    account_ids = [r[0] for r in rows]
+    tags_map = {}
+    if account_ids:
+        ph = ",".join("?" * len(account_ids))
+        tag_rows = conn.execute(
+            f"SELECT atl.account_id, t.id, t.name FROM account_tag_links atl "
+            f"JOIN account_tags t ON atl.tag_id = t.id WHERE atl.account_id IN ({ph})",
+            account_ids,
+        ).fetchall()
+        for aid, tid, tname in tag_rows:
+            tags_map.setdefault(aid, []).append({"id": tid, "name": tname})
+
+    conn.close()
+
+    accounts = []
+    for r in rows:
+        accounts.append({
+            "id": r[0], "name": r[1], "messenger": r[2],
+            "external_channel": r[3], "type": r[4],
+            "owner_id": r[5], "owner_name": r[6],
+            "created_at": r[7], "tags": tags_map.get(r[0], []),
+        })
+
+    return {"accounts": accounts, "total": total, "page": page, "per_page": per_page}
+
+
+@app.put("/api/accounts/bulk/owner")
+def bulk_assign_owner(req: BulkAssignOwnerRequest,
+                      _: dict = Depends(get_current_app_user)):
+    if not req.account_ids:
+        raise HTTPException(status_code=400, detail="account_ids required")
+    conn = sqlite3.connect(DB_PATH)
+    if req.owner_id is not None:
+        owner = conn.execute("SELECT id FROM app_users WHERE id=?", (req.owner_id,)).fetchone()
+        if not owner:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Owner user not found")
+    ph = ",".join("?" * len(req.account_ids))
+    conn.execute(f"UPDATE accounts SET owner_id = ? WHERE id IN ({ph})",
+                 [req.owner_id] + req.account_ids)
+    conn.commit()
+    updated = conn.total_changes
+    conn.close()
+    return {"updated": updated}
+
+
+@app.post("/api/accounts/bulk/tags")
+def bulk_add_tags(req: BulkAddTagsRequest,
+                  _: dict = Depends(get_current_app_user)):
+    if not req.account_ids or not req.tag_ids:
+        raise HTTPException(status_code=400, detail="account_ids and tag_ids required")
+    conn = sqlite3.connect(DB_PATH)
+    for aid in req.account_ids:
+        for tid in req.tag_ids:
+            conn.execute("INSERT OR IGNORE INTO account_tag_links (account_id, tag_id) VALUES (?, ?)",
+                         (aid, tid))
+    conn.commit()
+    conn.close()
+    return {"added": True}
+
+
+@app.delete("/api/accounts/bulk/tags")
+def bulk_remove_tags(req: BulkRemoveTagsRequest,
+                     _: dict = Depends(get_current_app_user)):
+    if not req.account_ids or not req.tag_ids:
+        raise HTTPException(status_code=400, detail="account_ids and tag_ids required")
+    conn = sqlite3.connect(DB_PATH)
+    ph_accounts = ",".join("?" * len(req.account_ids))
+    ph_tags = ",".join("?" * len(req.tag_ids))
+    conn.execute(
+        f"DELETE FROM account_tag_links WHERE account_id IN ({ph_accounts}) AND tag_id IN ({ph_tags})",
+        req.account_ids + req.tag_ids,
+    )
+    conn.commit()
+    conn.close()
+    return {"removed": True}
+
+
+@app.get("/api/accounts/tags")
+def list_tags(_: dict = Depends(get_current_app_user)):
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute("SELECT id, name FROM account_tags ORDER BY name").fetchall()
+    conn.close()
+    return {"tags": [{"id": r[0], "name": r[1]} for r in rows]}
+
+
+@app.post("/api/accounts/tags")
+def create_tag(req: CreateTagRequest, _: dict = Depends(get_current_app_user)):
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        c = conn.execute("INSERT INTO account_tags (name) VALUES (?)", (req.name,))
+        conn.commit()
+        tag_id = c.lastrowid
+    except sqlite3.IntegrityError:
+        conn.close()
+        raise HTTPException(status_code=409, detail="Tag already exists")
+    conn.close()
+    return {"id": tag_id, "name": req.name}
+
+
+@app.delete("/api/accounts/tags/{tag_id}")
+def delete_tag(tag_id: int, _: dict = Depends(get_current_app_user)):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM account_tag_links WHERE tag_id = ?", (tag_id,))
+    conn.execute("DELETE FROM account_tags WHERE id = ?", (tag_id,))
+    conn.commit()
+    conn.close()
+    return {"deleted": True}
+
+
+@app.get("/api/dashboard")
+def get_dashboard(_: dict = Depends(get_current_app_user)):
+    conn = sqlite3.connect(DB_PATH)
+    total = conn.execute("SELECT COUNT(*) FROM accounts").fetchone()[0]
+    telegram = conn.execute("SELECT COUNT(*) FROM accounts WHERE messenger='telegram'").fetchone()[0]
+    slack = conn.execute("SELECT COUNT(*) FROM accounts WHERE messenger='slack'").fetchone()[0]
+    channels = conn.execute("SELECT COUNT(*) FROM accounts WHERE type='channel'").fetchone()[0]
+    groups = conn.execute("SELECT COUNT(*) FROM accounts WHERE type='group'").fetchone()[0]
+    dm = conn.execute("SELECT COUNT(*) FROM accounts WHERE type='dm'").fetchone()[0]
+
+    rows = conn.execute("""
+        SELECT u.username, COUNT(a.id)
+        FROM accounts a
+        LEFT JOIN app_users u ON a.owner_id = u.id
+        WHERE a.type != 'dm'
+        GROUP BY a.owner_id
+        ORDER BY COUNT(a.id) DESC
+    """).fetchall()
+    conn.close()
+
+    chats_by_manager = [
+        {"manager_name": r[0] or "Unassigned", "chats_count": r[1]}
+        for r in rows
+    ]
+
+    return {
+        "total_chats": total,
+        "telegram_chats": telegram,
+        "slack_chats": slack,
+        "channels": channels,
+        "groups": groups,
+        "dm": dm,
+        "chats_by_manager": chats_by_manager,
+    }
+
 
 # ── Health ────────────────────────────────────────────────────────────────────
 @app.get("/health")
