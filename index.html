@@ -236,8 +236,8 @@ const api = {
   get: (path) => fetch(API_BASE+path, {headers:apiHeaders()}).then(r => {if(!r.ok) return r.json().then(e=>{throw new Error(e.detail||r.status)}).catch(()=>{throw new Error(r.status)}); return r.json();}),
   post: (path, body) => fetch(API_BASE+path, {method:'POST', headers:apiHeaders(), body:JSON.stringify(body)}).then(r => {if(!r.ok) return r.json().then(e=>{throw new Error(e.detail||r.status)}); return r.json();}),
   put: (path, body) => fetch(API_BASE+path, {method:'PUT', headers:apiHeaders(), body:JSON.stringify(body)}).then(r => {if(!r.ok) return r.json().then(e=>{throw new Error(e.detail||r.status)}); return r.json();}),
-  del: (path) => fetch(API_BASE+path, {method:'DELETE', headers:apiHeaders()}).then(r => r.json()),
-  del_body: (path, body) => fetch(API_BASE+path, {method:'DELETE', headers:apiHeaders(), body:JSON.stringify(body)}).then(r => r.json()),
+  del: (path) => fetch(API_BASE+path, {method:'DELETE', headers:apiHeaders()}).then(r => {if(!r.ok) return r.json().then(e=>{throw new Error(e.detail||r.status)}); return r.json();}),
+  del_body: (path, body) => fetch(API_BASE+path, {method:'DELETE', headers:apiHeaders(), body:JSON.stringify(body)}).then(r => {if(!r.ok) return r.json().then(e=>{throw new Error(e.detail||r.status)}); return r.json();}),
 };
 
 // ── Settings Screen (backend URL) ───────────────────────────────────────────
@@ -548,7 +548,7 @@ function CompanyUserManagement() {
       const body = {username: newUser, role: 'user'};
       if (newPwd) body.password = newPwd;
       const r = await api.post('/api/auth/users', body);
-      setMsg('User created! Password: ' + (r.generated_password || newPwd));
+      setMsg('User created! Password: ' + (r.password || newPwd));
       setNewUser(''); setNewPwd(''); setShowCreate(false); loadUsers();
     } catch(e) { setErr(e.message); }
   };
@@ -558,7 +558,7 @@ function CompanyUserManagement() {
       const r = await fetch(API_BASE+'/api/auth/users/'+uid+'/password', {
         method:'PUT', headers:apiHeaders(), body:JSON.stringify({})
       }).then(r=>r.json());
-      setResetInfo({uid, password: r.generated_password || 'Reset done'});
+      setResetInfo({uid, password: r.password || 'Reset done'});
     } catch(e) { setErr(e.message); }
   };
 
@@ -752,7 +752,7 @@ function SAUsersPage() {
       const r = await fetch(API_BASE+'/api/auth/users/'+uid+'/password', {
         method:'PUT', headers:apiHeaders(), body:JSON.stringify({})
       }).then(r=>r.json());
-      setResetInfo({uid, password: r.generated_password || 'Reset done'});
+      setResetInfo({uid, password: r.password || 'Reset done'});
     } catch(e) { setErr(e.message); }
   };
 
@@ -1011,12 +1011,13 @@ function UnifiedBroadcastPage({selected}) {
   };
 
   const startPoll = (bid) => {
+    if(pollRef.current) clearInterval(pollRef.current);
     setPolling(true);
     pollRef.current = setInterval(async () => {
       try {
         const s = await api.get('/api/unified/broadcast/status?broadcast_id='+bid);
         setStatus(s);
-        if(!s.running&&s.finished) { clearInterval(pollRef.current); setPolling(false); }
+        if(!s.running&&s.finished) { clearInterval(pollRef.current); pollRef.current=null; setPolling(false); }
       } catch(e){}
     }, 800);
   };
