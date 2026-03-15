@@ -118,13 +118,6 @@ def init_db():
     if "owner_app_user_id" not in existing_cols:
         c.execute("ALTER TABLE chat_lists ADD COLUMN owner_app_user_id INTEGER")
         logger.info("Migrated chat_lists: added owner_app_user_id")
-    hist_cols = {row[1] for row in c.execute("PRAGMA table_info(broadcast_history)")}
-    if "app_user_id" not in hist_cols:
-        c.execute("ALTER TABLE broadcast_history ADD COLUMN app_user_id INTEGER")
-        logger.info("Migrated broadcast_history: added app_user_id")
-    if "app_username" not in hist_cols:
-        c.execute("ALTER TABLE broadcast_history ADD COLUMN app_username TEXT")
-        logger.info("Migrated broadcast_history: added app_username")
     # ── templates ──
     c.execute("""CREATE TABLE IF NOT EXISTS templates (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -809,6 +802,8 @@ async def start_broadcast(req: BroadcastRequest,
         effective_token = req.as_session_token
 
     req.validate_message()
+    # Validate TG session exists before starting broadcast
+    get_tg_client(effective_token)
     status = get_broadcast_status(effective_token)
     if status["running"]:
         raise HTTPException(status_code=409, detail="Broadcast already running")
